@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
     plt.plot(iterations, mean_values, label="Mean value")
     plt.plot(iterations, best_values, label="Best value")
-    plt.xticks(iterations)
+    plt.xticks(iterations[0:len(iterations):int(len(iterations) / 20)])
     plt.legend()
 
     plt.show()

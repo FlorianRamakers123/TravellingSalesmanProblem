@@ -15,7 +15,7 @@ class r0714272:
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
 
-		ap = AlgorithmParameters(la=100, mu=50, init_alpha=0.05, init_beta=0.9, k=3, max_iter=500)
+		ap = AlgorithmParameters(la=100, mu=50, init_alpha=0.05, init_beta=0.9, k=3, max_iter=500, min_std=0.01, std_tol=100)
 		tsp = TSP(distance_matrix, ap)
 
 		# Initialize the population
@@ -23,6 +23,7 @@ class r0714272:
 
 		while not tsp.has_converged():
 			(mean_obj, best_obj, best_sol) = tsp.report_values()
+			print("mean: {}, best: {}".format(mean_obj, best_obj))
 			time_left = self.reporter.report(mean_obj, best_obj, best_sol)
 			if time_left < 0:
 				break
@@ -47,6 +48,8 @@ class TSP:
 		self.offsprings = []
 		self.iterations = 0
 
+		self.counter = 0 # used for std_tol
+
 	def fitness(self, ind):
 		"""
 		Calculate the fitness value of the given individual.
@@ -60,7 +63,7 @@ class TSP:
 		"""
 		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
 		"""
-		self.population = [Individual(np.random.permutation(self.n), self.params.init_alpha, self.params.init_beta)]
+		self.population = [Individual(np.random.permutation(self.n), self.params.init_alpha, self.params.init_beta) for _ in range(self.params.la)]
 
 	def select(self):
 		"""
@@ -74,7 +77,7 @@ class TSP:
 
 	def create_offsprings(self):
 		""" Select 2 * mu parents from the population and apply a recombination operator on them. """
-		parents = [(self.select(), self.select()) for _ in range(self.params.mu)]
+		parents = [(self.select(), self.select()) for _ in range(int(self.params.mu / 2))]
 		for (p1,p2) in parents:
 			if rnd.random() <= p1.beta:
 				self.offsprings.append(self.recombine(p1,p2))
@@ -112,7 +115,7 @@ class TSP:
 		Mutate the population.
 		#TODO: should the whole population be mutated?
 		"""
-		for ind in self.population:
+		for ind in self.offsprings:
 			ind.mutate()
 
 	def elimination(self):
@@ -137,7 +140,7 @@ class TSP:
 		### CURRENT IMPLEMENTATION: iteration count
 		:return: True if the algorithm should stop, False otherwise
 		"""
-		return self.iterations >= self.params.max_iter
+		return self.iterations >= self.params.max_iter or self.counter > self.params.std_tol
 
 	def report_values(self):
 		"""
@@ -169,6 +172,9 @@ class TSP:
 		self.local_search()
 		self.elimination()
 		self.iterations += 1
+		fitnesses = [self.fitness(ind) for ind in self.population]
+		if np.sqrt(np.var(fitnesses)) < self.params.min_std:
+			self.counter += 1
 
 class Individual:
 	"""
@@ -213,17 +219,20 @@ class AlgorithmParameters:
 		### THESE MIGHT CHANGE
 		* k: the parameter for the k-tournament selection
 		* max_iter: the maximum amount of iterations the algorithm can run
+		* min_std: the minimal standard deviation the population must have
+		* std_tol: the maximum amount of iterations the standard deviations can be lower than min_std
 
 	"""
 
-	def __init__(self, la, mu, init_alpha, init_beta, k, max_iter):
+	def __init__(self, la, mu, init_alpha, init_beta, k, max_iter, min_std, std_tol):
 		self.la = la
 		self.mu = mu
 		self.init_alpha = init_alpha
 		self.init_beta = init_beta
 		self.k = k
 		self.max_iter = max_iter
-
+		self.min_std = min_std
+		self.std_tol = std_tol
 
 ### UTILITY METHODS
 
