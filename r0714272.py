@@ -15,8 +15,7 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-
-		self.ap = AlgorithmParameters(la=100, mu=50, init_alpha=0.05, init_beta=0.9, k=3, max_iter=500, min_std=0.01, std_tol=100, k_opt=0, gamma=0.9, min_dist=2, p_exp=2)
+		self.ap = AlgorithmParameters(la=50, mu=100, init_alpha=0.05, init_beta=0.9, k=3, max_iter=500, min_std=0.01, std_tol=100, k_opt=2, gamma=0.0, min_dist=30, p_exp=2, nbh_limit=5)
 		tsp = TSP(distance_matrix, self.ap)
 
 		# Initialize the population
@@ -51,50 +50,62 @@ class TSP:
 		self.iterations = 0
 
 		self.counter = 0 # used for std_tol
+		self.distances = None
 
-	def fitness(self, ind):
+	def fitness(self, perm):
 		"""
-		Calculate the fitness value of the given individual.
-		:param ind: The Individual object to calculate the fitness for.
-		:return: The fitness value of the given individual.
+		Calculate the fitness value of the given tour.
+		:param perm: The order of the cities.
+		:return: The fitness value of the given tour.
 		"""
-		length = ind.perm.shape[0]
-		return sum(self.distance_matrix[int(ind.perm[i % length]), int(ind.perm[(i + 1) % length])] for i in range(length))
+		length = perm.shape[0]
+		return sum(self.distance_matrix[int(perm[i % length]), int(perm[(i + 1) % length])] for i in range(length))
 
-	def penalty(self, ind):
+	def penalty(self, perm):
 		"""
-		Calculate the penalty for the given Individual.
-		:param ind: The Individual to calculate the penalty for.
-		:return: The penalty for the given Individual.
+		Calculate the penalty for the given permutation.
+		:param perm: The permutation to calculate the penalty for.
+		:return: The penalty for the given permutation.
 		"""
-		#return 1
-		distances = [(y, self.distance(ind, y)) for y in self.population + self.offsprings]
-		N = [(y,dist) for (y,dist) in distances if dist < self.params.min_dist]
-		return sum(1 - pow(dist / self.params.min_dist, self.params.p_exp) for (_,dist) in N)
+		return 1
+		#distances = [(y, self.distance(perm, y.perm)) for y in self.offsprings]
+		#N = [(y,dist) for (y,dist) in distances if dist < self.params.min_dist]
+		#return sum(1 - pow(dist / self.params.min_dist, self.params.p_exp) for (_,dist) in N)
 
-	def distance(self, ind1, ind2):
+	def distance(self, perm1, perm2):
 		"""
-		Calculate the distance between two Individuals.
-		:param ind1: The first Individual.
-		:param ind2: The second Individual.
-		:return: The distance between the two given Individuals.
+		Calculate the distance between two permutations.
+		:param perm1: The first permutations.
+		:param perm2: The second permutations.
+		:return: The distance between the two given permutations.
 		"""
-		perm1 = ind1.perm
-		try:
-			start_idx = int((np.where(ind2.perm == perm1[0])[0])[0])
-		except IndexError:
-			print(ind1.perm)
-			print(ind2.perm)
-			raise IndexError()
-		new_perm = [ind2.perm[i % self.n] for i in range(start_idx, start_idx + self.n)]
-		perm2 = np.array(new_perm)
-		return min_swap(perm1,perm2)
+		start_idx = np.flatnonzero(perm2 == perm1[0])[0]
+		if start_idx < self.n / 2:
+			return min_swap(perm1, np.roll(perm2, -start_idx))
+		else:
+			return min_swap(perm1, np.roll(perm2, self.n - start_idx))
+
+	def distance0(self, perm1, perm2):
+		"""
+		Calculate the distance between two permutations.
+		:param perm1: The first permutations.
+		:param perm2: The second permutations.
+		:return: The distance between the two given permutations.
+		"""
+		start_idx = np.flatnonzero(perm2 == perm1[0])[0]
+		if start_idx < self.n / 2:
+			return np.linalg.norm(perm1 - np.roll(perm2, -start_idx))
+		else:
+			return np.linalg.norm(perm1 - np.roll(perm2, self.n - start_idx))
+
+		#return len({(perm1[i], perm1[(i+1) % self.n]) for i in range(self.n)}.intersection({(perm2[i], perm2[(i+1) % self.n]) for i in range(self.n)}))
 
 	def initialize(self):
 		"""
 		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
 		"""
-		self.population = [Individual(np.random.permutation(self.n), self.params.init_alpha, self.params.init_beta) for _ in range(self.params.la)]
+		permutations = [np.random.permutation(self.n) for _ in range(self.params.la)]
+		self.population = [Individual(permutations[i], self.params.init_alpha, self.params.init_beta, self.fitness(permutations[i]), self.penalty(permutations[i])) for i in range(self.params.la)]
 
 	def select(self):
 		"""
@@ -103,17 +114,17 @@ class TSP:
 		:return: An Individual object that represents a parent.
 		"""
 		selected = rnd.choices(self.population, k=self.params.k)
-		selected = sorted(selected, key=lambda ind: self.fitness(ind)) 	# TODO: sorting using the fitness value might be to computationally expensive
+		selected = sorted(selected, key=lambda ind: ind.fitness)
 		return selected[0]
 
 	def create_offsprings(self):
 		""" Select 2 * mu parents from the population and apply a recombination operator on them. """
-		parents = [(self.select(), self.select()) for _ in range(int(self.params.mu / 2))]
+		parents = [(self.select(), self.select()) for _ in range(int(self.params.mu))]
 		for (p1,p2) in parents:
 			if rnd.random() <= p1.beta:
 				self.offsprings.append(self.recombine(p1,p2))
-			if rnd.random() <= p2.beta:
-				self.offsprings.append(self.recombine(p2,p1))
+			#if rnd.random() <= p2.beta:
+			#	self.offsprings.append(self.recombine(p2,p1))
 
 	# TODO: If recombine works better delete this
 	def recombine0(self, parent1, parent2):
@@ -140,7 +151,7 @@ class TSP:
 		new_alpha = parent1.alpha + c1 * (parent2.alpha - parent1.alpha)
 		c2 = 2 * (rnd.random() - 0.5)
 		new_beta = parent1.beta + c2 * (parent2.beta - parent1.beta) #TODO: should beta be self-adapted?
-		return Individual(offspring_perm, new_alpha, new_beta)
+		return Individual(offspring_perm, new_alpha, new_beta, self.fitness(offspring_perm), self.penalty(offspring_perm))
 
 	def recombine(self, parent1, parent2):
 		"""
@@ -179,23 +190,25 @@ class TSP:
 		new_alpha = parent1.alpha + c1 * (parent2.alpha - parent1.alpha)
 		c2 = 2 * (rnd.random() - 0.5)
 		new_beta = parent1.beta + c2 * (parent2.beta - parent1.beta) #TODO: should beta be self-adapted?
-		return Individual(perm_offspring, new_alpha, new_beta)
+		return Individual(perm_offspring, new_alpha, new_beta, self.fitness(perm_offspring), self.penalty(perm_offspring))
 
 	def mutate(self):
 		"""
 		Mutate the population.
-		#TODO: should the whole population be mutated?
 		"""
 		for ind in self.offsprings:
-			ind.mutate()
+			if rnd.random() <= ind.alpha:
+				ind.mutate()
+				ind.fitness = self.fitness(ind.perm)
+				ind.penalty = self.penalty(ind.perm)
 
 	def elimination(self):
 		"""
 		Eliminate certain Individuals from the population.
-		### CURRENT IMPLEMENTATION: lambda + mu elimination + fitness sharing
+		### CURRENT IMPLEMENTATION: lambda, mu elimination + fitness sharing
 		"""
-		#TODO: maybe we can keep the population sorted and merge the offsprings?
-		self.population = sorted(self.offsprings + self.population, key= lambda ind: self.fitness(ind) * self.penalty(ind))[0:self.params.la]
+		self.population = sorted(self.offsprings, key= lambda ind: ind.fitness * ind.penalty)[0:self.params.la]
+		self.offsprings = []
 
 	def local_search(self):
 		"""
@@ -204,11 +217,13 @@ class TSP:
 		"""
 		for ind in self.offsprings:
 			if rnd.random() < self.params.gamma:
-				nbh = ind.get_neighbourhood(self.params.k_opt) + [ind]
-				nbh = sorted(nbh, key=lambda i: self.fitness(i))
+				nbh = self.get_neighbourhood(ind) + [ind]
+				nbh = sorted(nbh, key=lambda i: i.fitness)
 				ind.perm = nbh[0].perm
 				ind.alpha = nbh[0].alpha
 				ind.beta = nbh[0].beta
+				ind.fitness = nbh[0].fitness
+				ind.penalty = self.penalty(nbh[0].perm)
 
 	def has_converged(self):
 		"""
@@ -217,6 +232,35 @@ class TSP:
 		:return: True if the algorithm should stop, False otherwise
 		"""
 		return self.iterations >= self.params.max_iter or self.counter > self.params.std_tol
+
+	def get_neighbourhood(self, ind):
+		"""
+		Get the entire neighbourhood of the given Individual.
+		:param ind: The individual to calculate the neighbourhood for.
+		:return: A list of individuals that represent the k-level neighbourhood of the given Individual.
+		"""
+		nbs = []
+		idx = 0
+		self.get_neighbours(ind, nbs)
+		for i in range(self.params.k_opt - 1):
+			old_size = len(nbs) - idx
+			for j in range(idx, len(nbs)):
+				self.get_neighbours(nbs[j], nbs)
+			idx += old_size
+		return nbs
+
+
+	def get_neighbours(self, ind, nbs_list):
+		"""
+		Get the neighbours of the given Individual.
+		:param ind: The Individual to calculate the neighbours for.
+		:param nbs_list: The list to append the neighbours to.
+		:return: A list of all individuals who are one swap away of this individual.
+		"""
+		swaps = [random_ind(self.n) for _ in range(self.params.nbh_limit)]
+		for (i, j) in swaps:
+			perm = flip_copy(ind.perm, i, j)
+			nbs_list.append(Individual(perm, ind.alpha, ind.beta, self.fitness(perm), -1))
 
 	def report_values(self):
 		"""
@@ -231,7 +275,7 @@ class TSP:
 		best_fitness = -1
 		best_individual = None
 		for ind in self.population:
-			f = self.fitness(ind)
+			f = ind.fitness
 			mean += f
 			if f < best_fitness or best_fitness == -1:
 				best_fitness = f
@@ -243,12 +287,17 @@ class TSP:
 	Update the population.
 	"""
 	def update(self):
+		print("Creating offsprings...")
 		self.create_offsprings()
+		print("Mutating...")
 		self.mutate()
+		print("Local search...")
 		self.local_search()
+		print("Elimination...")
 		self.elimination()
+
 		self.iterations += 1
-		fitnesses = [self.fitness(ind) for ind in self.population]
+		fitnesses = [ind.fitness for ind in self.population]
 		if np.sqrt(np.var(fitnesses)) < self.params.min_std:
 			self.counter += 1
 		else:
@@ -260,55 +309,27 @@ class Individual:
 	This class will represent an individual in the population.
 	"""
 
-	def __init__(self, perm, alpha, beta):
+	def __init__(self, perm, alpha, beta, fitness, penalty):
 		"""
 		Create a new TSPTour with the specified parameters
 		:param perm: The permutation, this should be a numpy.array containing the order of the cities.
 		:param alpha: The probability that this individual will mutate.
 		:param beta: The probability that this individual will create an offspring.
+		:param fitness: The fitness value for this individual.
+		:param beta: The penalty this Individual should receive.
 		"""
 		self.perm = perm
 		self.alpha = alpha
 		self.beta = beta
+		self.fitness = fitness
+		self.penalty = penalty
 
 	def mutate(self):
-		"""
-		Mutate this individual.
-		"""
-		if rnd.random() <= self.alpha:
-			self.mutate0()
-
-	def mutate0(self):
 		"""
 		### CURRENT IMPLEMENTATION: inversion mutation
 		"""
 		(start, end) = random_ind(self.perm.shape[0])
 		self.perm[start:end] = np.flip(self.perm[start:end])
-
-
-
-	def get_neighbourhood(self, k):
-		"""
-		Get the entire neighbourhood of this Individual.
-		:param k: The level of neighbourhood expansion.
-		:return: A list of individuals that represent the k-level neighbourhood of this Individual.
-		"""
-		nbh = self.get_neighbours()
-		for i in range(k - 1):
-			nbh += flatten([ind.get_neighbours() for ind in nbh])
-		return nbh
-
-
-	def get_neighbours(self):
-		"""
-		Get the neighbours of this Individual.
-		:return: A list of all individuals who are one swap away of this individual.
-		"""
-		nbs = []
-		all_swaps = [(i, j) for i in range(self.perm.shape[0]) for j in range(i)]
-		for (i, j) in all_swaps:
-			nbs.append(Individual(swap_copy(self.perm, i, j), self.alpha, self.beta))
-		return nbs
 
 	def get_next(self, city):
 		"""
@@ -335,9 +356,10 @@ class AlgorithmParameters:
 		* k_opt: the parameter used in k-opt local search
 		* min_dist: the minimal distance two Individuals must have in order to not receive a penalty.
 		* p_exp: the exponent that is used in the fitness sharing penalty calculation
+		* nbh_limit: the amount of neighbours to calculate
 	"""
 
-	def __init__(self, la, mu, init_alpha, init_beta, gamma, k, max_iter, min_std, std_tol, k_opt, min_dist, p_exp):
+	def __init__(self, la, mu, init_alpha, init_beta, gamma, k, max_iter, min_std, std_tol, k_opt, min_dist, p_exp, nbh_limit):
 		self.la = la
 		self.mu = mu
 		self.init_alpha = init_alpha
@@ -350,6 +372,7 @@ class AlgorithmParameters:
 		self.k_opt = k_opt
 		self.min_dist = min_dist
 		self.p_exp = p_exp
+		self.nbh_limit = nbh_limit
 
 
 ### UTILITY METHODS
@@ -379,6 +402,17 @@ def swap_copy(x, i, j):
 	y[i],y[j] = y[j], y[i]
 	return y
 
+def flip_copy(x, i, j):
+	"""
+	Return a copy of the given numpy array with x[i+1:j] flipped.
+	:param x: The numpy array to perform the operation on.
+	:param i: The first index.
+	:param j: The second index.
+	:return: A copy of the given numpy array with x[i+1:j] flipped.
+	"""
+	y = np.array(x)
+	y[i+1:j] = np.flip(y[i+1:j])
+	return y
 
 def flatten(x):
 	"""
