@@ -3,10 +3,7 @@ import numpy as np
 import random as rnd
 
 ### TO-DO-LIST
-# TODO: the chance of mutation should drop towards the end
 # TODO: checkout round robin based elimination
-# TODO: the k should be large in the beginning and small near the end
-# TODO: mutation should have large intervals in the beginning and small in the end
 
 class r0714272:
 
@@ -21,7 +18,7 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		self.ap = AlgorithmParameters(la=50, mu=100, init_alpha=0.1, init_beta=0.9, k=5, max_iter=500, min_std=0.01, std_tol=100, k_opt=2, gamma=0.0, min_dist=30, p_exp=2, nbh_limit=5)
+		self.ap = AlgorithmParameters(la=500, mu=1000, beta=0.9)
 		tsp = TSP(distance_matrix, self.ap)
 
 		# Initialize the population
@@ -42,7 +39,7 @@ class r0714272:
 class TSP:
 	""" A class that represents the evolutionary algorithm used to find solutions to the Travelling Salesman Problem (TSP) """
 
-	def __init__(self, distance_matrix, params):
+	def __init__(self, distance_matrix, params, ):
 		"""
 		Create a new TSPAlgorithm object.
 		:param distance_matrix: The distance matrix that contains the distances between all the cities.
@@ -50,13 +47,16 @@ class TSP:
 		"""
 		self.distance_matrix = distance_matrix
 		self.params = params
-		self.n = distance_matrix.shape[0]
-		self.population = []
-		self.offsprings = []
-		self.iterations = 0
+		self.n = distance_matrix.shape[0]				# The length of the tour
+		self.population = []							# The list of Individual objects
+		self.offsprings = []							# The list that will contain the offsprings
 
-		self.counter = 0 # used for std_tol
-		self.distances = None
+		self.so = SelectionOperator(max(3, int(0.1 * self.n) + 1), 2)
+		self.mo = MutationOperator(0.2, 0.05, self.n, 2)
+		self.ro = RecombinationOperator(distance_matrix)
+		self.lso = LocalSearchOperator(self.fitness, 2, 5)
+		self.eo = EliminationOperator(params.la, 2)
+		self.cc = ConvergenceChecker(10)
 
 	def fitness(self, perm):
 		"""
@@ -66,89 +66,211 @@ class TSP:
 		"""
 		return np.sum(np.array([self.distance_matrix[perm[i % self.n], perm[(i + 1) % self.n]] for i in range(self.n)]))
 
-	def penalty(self, perm):
-		"""
-		Calculate the penalty for the given permutation.
-		:param perm: The permutation to calculate the penalty for.
-		:return: The penalty for the given permutation.
-		"""
-		return 1
-		#distances = [(y, self.distance(perm, y.perm)) for y in self.offsprings]
-		#N = [(y,dist) for (y,dist) in distances if dist < self.params.min_dist]
-		#return sum(1 - pow(dist / self.params.min_dist, self.params.p_exp) for (_,dist) in N)
-
-	def distance(self, perm1, perm2):
-		"""
-		Calculate the distance between two permutations.
-		:param perm1: The first permutations.
-		:param perm2: The second permutations.
-		:return: The distance between the two given permutations.
-		"""
-		start_idx = np.flatnonzero(perm2 == perm1[0])[0]
-		if start_idx < self.n / 2:
-			return min_swap(perm1, np.roll(perm2, -start_idx))
-		else:
-			return min_swap(perm1, np.roll(perm2, self.n - start_idx))
-
 	def initialize(self):
 		"""
 		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
 		"""
 		permutations = [np.random.permutation(self.n) for _ in range(self.params.la)]
-		self.population = [Individual(permutations[i], self.params.init_alpha, self.params.init_beta, self.fitness(permutations[i]), self.penalty(permutations[i])) for i in range(self.params.la)]
-
-	def select(self):
-		"""
-		Select a parent from the population for recombination.
-		### CURRENT IMPLEMENATION K-tournament
-		:return: An Individual object that represents a parent.
-		"""
-		selected = rnd.choices(self.population, k=self.params.k)
-		selected = sorted(selected, key=lambda ind: ind.fitness)
-		return selected[0]
+		self.population = [Individual(permutations[i], self.fitness(permutations[i])) for i in range(self.params.la)]
 
 	def create_offsprings(self):
 		""" Select 2 * mu parents from the population and apply a recombination operator on them. """
-		parents = [(self.select(), self.select()) for _ in range(int(self.params.mu))]
-		for (p1,p2) in parents:
-			if rnd.random() <= p1.beta:
-				self.offsprings.append(self.recombine(p1,p2))
-			#if rnd.random() <= p2.beta:
-			#	self.offsprings.append(self.recombine(p2,p1))
+		while len(self.offsprings) < self.params.mu:
+			if rnd.random() <= self.params.beta:
+				p1,p2 = self.so.select(self.population), self.so.select(self.population)
+				perm_offspring = self.ro.recombine(p1,p2)
+				self.offsprings.append(Individual(perm_offspring, self.fitness(perm_offspring)))
 
-	# TODO: If recombine works better delete this
-	def recombine0(self, parent1, parent2):
+	def mutate(self):
 		"""
-		### CURRENT IMPLEMENTATION: order crossover
-		:param parent1: The first parent.
-		:param parent2: The second parent.
-		:return: An Individual object that represents the offspring of parent1 and parent2
+		Mutate the population.
 		"""
-		length = parent1.perm.shape[0]
-		(start, end) = random_ind(length)
+		for ind in self.offsprings:
+			if self.mo.mutate(ind.perm):
+				ind.fitness = self.fitness(ind.perm)
 
-		offspring_perm = np.ones(length).astype(int)
-		offspring_perm[start:end + 1] = parent1.perm[start:end + 1]
+	def elimination(self):
+		"""
+		Eliminate certain Individuals from the population.
+		"""
+		self.population = self.eo.eliminate(self.offsprings)
+		self.offsprings = []
 
-		k = 0
+	def local_search(self):
+		"""
+		Apply local search to optimize the population.
+		"""
+		for ind in self.offsprings:
+			nbh = self.lso.get_neighbourhood(ind) + [ind]
+			nbh = sorted(nbh, key=lambda i: i.fitness)
+			ind.perm = nbh[0].perm
+			ind.fitness = nbh[0].fitness
 
-		for i in range(length):
-			if parent2.perm[(end + i + 1) % length] not in offspring_perm:
-				offspring_perm[(end + k + 1) % length] = parent2.perm[(end + i + 1) % length]
-				k += + 1
 
-		c1 = 2 * (rnd.random() - 0.5)
-		new_alpha = parent1.alpha + c1 * (parent2.alpha - parent1.alpha)
-		c2 = 2 * (rnd.random() - 0.5)
-		new_beta = parent1.beta + c2 * (parent2.beta - parent1.beta) #TODO: should beta be self-adapted?
-		return Individual(offspring_perm, new_alpha, new_beta, self.fitness(offspring_perm), self.penalty(offspring_perm))
+	def has_converged(self):
+		"""
+		Check whether the algorithm has converged and should be stopped
+		:return: True if the algorithm should stop, False otherwise
+		"""
+		return not self.cc.should_continue(self.population)
+
+	def report_values(self):
+		"""
+		Return a tuple containing the following:
+			- the mean objective function value of the population
+			- the best objective function value of the population
+			- a 1D numpy array in the cycle notation containing the best solution
+			  with city numbering starting from 0
+		:return: A tuple (m, bo, bs) that represent the mean objective, best objective and best solution respectively
+		"""
+		mean = 0
+		best_fitness = -1
+		best_individual = None
+		for ind in self.population:
+			f = ind.fitness
+			mean += f
+			if f < best_fitness or best_fitness == -1:
+				best_fitness = f
+				best_individual = ind
+		mean = mean / len(self.population)
+		return mean, best_fitness, best_individual.perm
+
+
+	def update(self):
+		"""
+		Update the population.
+		"""
+		print("Creating offsprings...")
+		self.create_offsprings()
+		print("Mutating...")
+		self.mutate()
+		print("Local search...")
+		self.local_search()
+		print("Elimination...")
+		self.elimination()
+		(mean_obj, best_obj, _) = self.report_values()
+		print("Updating...")
+		self.so.update(best_obj, mean_obj)
+		self.mo.update(best_obj, mean_obj)
+
+
+class Individual:
+	"""
+	A class that represents an order in which to visit the cities.
+	This class will represent an individual in the population.
+	"""
+
+	def __init__(self, perm, fitness):
+		"""
+		Create a new TSPTour with the specified parameters
+		:param perm: The permutation, this should be a numpy.array containing the order of the cities.
+		:param fitness: The fitness value for this individual.
+		"""
+		self.perm = perm
+		self.fitness = fitness
+		self.n = self.perm.shape[0]
+		self.next_cities = { self.perm[i] : self.perm[(i+1) % self.n] for i in range(self.n) }
+
+	def get_next(self, city):
+		"""
+		Get the city that follows next to the given city
+		:param city: The number of the city (starting from zero)
+		:return: The number of the city that follows the given city in this Individual.
+		"""
+		return self.next_cities[city]
+
+class SelectionOperator:
+	"""
+	Class that represents a selection operator for a genetic algorithm.
+	This operator is updated to make sure that we have large values for k in the beginning and small values near the end
+	"""
+
+	def __init__(self, max_k, min_k):
+		"""
+		Create a new SelectionOperator
+		:param max_k: The maximal value for parameter for the k-tournament selection.
+		:param min_k: The minimal value for parameter for the k-tournament selection.
+		"""
+		self.max_k = max_k
+		self.min_k = min_k
+		self.k = max_k
+
+	def update(self, best_obj, mean_obj):
+		"""
+		Update the value of k.
+		:param best_obj: The current best objective
+		:param mean_obj: The current mean objective
+		"""
+		self.k = int(min(self.max_k, max(self.min_k, mean_obj / best_obj * self.min_k)))
+
+	def select(self, population):
+		"""
+		Select a parent from the population for recombination.
+		:param population: The population to choose from
+		:return: An Individual object that represents a parent.
+		"""
+		selected = rnd.choices(population, k=self.k)
+		selected = sorted(selected, key=lambda ind: ind.fitness)
+		return selected[0]
+
+class MutationOperator:
+	"""
+	Class that represents a mutation operator for a genetic algorithm.
+	This operator is updated to make sure that we have large values for alpha in the beginning and small values near the end.
+	"""
+
+	def __init__(self, max_alpha, min_alpha, max_length, min_length):
+		"""
+		Create a new SelectionOperator
+		:param max_alpha: The maximal value for parameter alpha.
+		:param min_alpha: The minimal value for parameter alpha.
+		:param max_length: The maximal length of the tour to invert
+		:param min_length: The minimal length of the tour to invert
+		"""
+		self.max_alpha = max_alpha
+		self.min_alpha = min_alpha
+		self.alpha = max_alpha
+
+		self.max_length = max_length
+		self.min_length = min_length
+		self.length = max_length
+
+	def update(self, best_obj, mean_obj):
+		"""
+		Update the value of alpha and the length of the tour to invert.
+		:param best_obj: The current best objective
+		:param mean_obj: The current mean objective
+		"""
+		self.alpha = min(self.max_alpha, max(self.min_alpha, mean_obj / best_obj * self.min_alpha))
+		self.length = round(min(self.max_length, max(self.min_length, mean_obj / best_obj * self.min_length)))
+
+	def mutate(self, perm):
+		"""
+		Mutate the given permutation.
+		:param perm: The permutation to mutate.
+		:return: True if the given perm was mutated, False otherwise.
+		"""
+		if rnd.random() <= self.alpha: #TODO: alpha is no longer self-adapted, is this a good idea?
+			(start, end) = random_ind(perm.shape[0])
+			end -= max((end - start) - self.length, 0)
+			perm[start:end] = np.flip(perm[start:end])
+			return True
+		return False
+
+class RecombinationOperator:
+	"""
+	Class that represents a recombination operator for a genetic algorithm.
+	"""
+
+	def __init__(self, distance_matrix):
+		self.distance_matrix = distance_matrix
+		self.n = distance_matrix.shape[0]
 
 	def recombine(self, parent1, parent2):
 		"""
-		### CURRENT IMPLEMENTATION: heuristic crossover
-		:param parent1: The first parent.
-		:param parent2: The second parent.
-		:return: An Individual object that represents the offspring of parent1 and parent2
+		:param parent1: The first parent permutation.
+		:param parent2: The second parent permutation.
+		:return: An permutation that represents the offspring of parent1 and parent2
 		"""
 		start = rnd.randrange(0, self.n)
 		perm_offspring = np.zeros(shape=self.n, dtype=int)
@@ -175,52 +297,21 @@ class TSP:
 					p = rnd.randrange(0, self.n)
 				perm_offspring[i] = p
 
-		c1 = 2 * (rnd.random() - 0.5)
-		new_alpha = parent1.alpha + c1 * (parent2.alpha - parent1.alpha)
-		c2 = 2 * (rnd.random() - 0.5)
-		new_beta = parent1.beta + c2 * (parent2.beta - parent1.beta) #TODO: should beta be self-adapted?
-		return Individual(perm_offspring, new_alpha, new_beta, self.fitness(perm_offspring), self.penalty(perm_offspring))
+		return perm_offspring
 
-	def mutate(self):
-		"""
-		Mutate the population.
-		"""
-		for ind in self.offsprings:
-			if rnd.random() <= ind.alpha:
-				ind.mutate()
-				ind.fitness = self.fitness(ind.perm)
-				ind.penalty = self.penalty(ind.perm)
+class LocalSearchOperator:
+	""" Class that represents a local search operator. """
 
-	def elimination(self):
+	def __init__(self, objf, k, nbh_limit):
 		"""
-		Eliminate certain Individuals from the population.
-		### CURRENT IMPLEMENTATION: lambda, mu elimination + fitness sharing
+		Create new LocalSearchOperator.
+		:param objf: The objective function to use
+		:param k: The parameter used in k-opt local search.
+		:param nbh_limit: The maximal amount of neighbours to calculate.
 		"""
-		self.population = sorted(self.offsprings, key= lambda ind: ind.fitness * ind.penalty)[0:self.params.la]
-		self.offsprings = []
-
-	def local_search(self):
-		"""
-		Apply local search to optimize the population.
-		### CURRENT IMPLEMENTATION: k-opt search
-		"""
-		for ind in self.offsprings:
-			if rnd.random() < self.params.gamma:
-				nbh = self.get_neighbourhood(ind) + [ind]
-				nbh = sorted(nbh, key=lambda i: i.fitness)
-				ind.perm = nbh[0].perm
-				ind.alpha = nbh[0].alpha
-				ind.beta = nbh[0].beta
-				ind.fitness = nbh[0].fitness
-				ind.penalty = self.penalty(nbh[0].perm)
-
-	def has_converged(self):
-		"""
-		Check whether the algorithm has converged and should be stopped
-		### CURRENT IMPLEMENTATION: iteration count
-		:return: True if the algorithm should stop, False otherwise
-		"""
-		return self.iterations >= self.params.max_iter or self.counter > self.params.std_tol
+		self.objf = objf
+		self.k = k
+		self.nbh_limit = nbh_limit
 
 	def get_neighbourhood(self, ind):
 		"""
@@ -230,140 +321,104 @@ class TSP:
 		"""
 		nbs = []
 		idx = 0
-		self.get_neighbours(ind, nbs)
-		for i in range(self.params.k_opt - 1):
+		self._get_neighbours(ind, nbs)
+		for i in range(self.k - 1):
 			old_size = len(nbs) - idx
 			for j in range(idx, len(nbs)):
-				self.get_neighbours(nbs[j], nbs)
+				self._get_neighbours(nbs[j], nbs)
 			idx += old_size
 		return nbs
 
 
-	def get_neighbours(self, ind, nbs_list):
+	def _get_neighbours(self, ind, nbs_list):
 		"""
 		Get the neighbours of the given Individual.
 		:param ind: The Individual to calculate the neighbours for.
 		:param nbs_list: The list to append the neighbours to.
 		:return: A list of all individuals who are one swap away of this individual.
 		"""
-		swaps = [random_ind(self.n) for _ in range(self.params.nbh_limit)]
+		swaps = [random_ind(ind.n) for _ in range(self.nbh_limit)]
 		for (i, j) in swaps:
 			perm = flip_copy(ind.perm, i, j)
-			nbs_list.append(Individual(perm, ind.alpha, ind.beta, self.fitness(perm), -1))
+			nbs_list.append(Individual(perm, self.objf(perm)))
 
-	def report_values(self):
+class ConvergenceChecker:
+	""" A class for checking if the population has converged. """
+
+	def __init__(self, min_std):
 		"""
-		Return a tuple containing the following:
-			- the mean objective function value of the population
-			- the best objective function value of the population
-			- a 1D numpy array in the cycle notation containing the best solution
-			  with city numbering starting from 0
-		:return: A tuple (m, bo, bs) that represent the mean objective, best objective and best solution respectively
+		Create a new ConvergenceChecker.
+		:param min_std: The minimal standard deviation that the population should have.
 		"""
-		mean = 0
-		best_fitness = -1
-		best_individual = None
-		for ind in self.population:
-			f = ind.fitness
-			mean += f
-			if f < best_fitness or best_fitness == -1:
-				best_fitness = f
-				best_individual = ind
-		mean = mean / len(self.population)
-		return mean, best_fitness, best_individual.perm
+		self.min_std = min_std
 
-	"""
-	Update the population.
-	"""
-	def update(self):
-		print("Creating offsprings...")
-		self.create_offsprings()
-		print("Mutating...")
-		self.mutate()
-		print("Local search...")
-		self.local_search()
-		print("Elimination...")
-		self.elimination()
+	def should_continue(self, population):
+		"""
+		Check if the algorithm shoud continue.
+		:param population: The population that is maintained by the algorithm.
+		:return: True if the algorithm should continue, False otherwise.
+		"""
+		fitnesses = [ind.fitness for ind in population]
+		return np.sqrt(np.var(fitnesses)) > self.min_std
 
-		self.iterations += 1
-		fitnesses = [ind.fitness for ind in self.population]
-		if np.sqrt(np.var(fitnesses)) < self.params.min_std:
-			self.counter += 1
+class EliminationOperator:
+	""" Class that represents an elimination operator. """
+
+	def __init__(self, keep, k):
+		"""
+		Create a new EliminationOperator.
+		:param keep:
+		:param k: The amount of individuals to sample for choosing the victim.
+		"""
+		self.keep = keep
+		self.k = k
+
+	@staticmethod
+	def distance(perm1, perm2):
+		"""
+		Calculate the distance between two permutations.
+		:param perm1: The first permutations.
+		:param perm2: The second permutations.
+		:return: The distance between the two given permutations.
+		"""
+		start_idx = np.flatnonzero(perm2 == perm1[0])[0]
+		if start_idx < perm1.shape[0] / 2:
+			return min_swap(perm1, np.roll(perm2, -start_idx))
 		else:
-			self.counter = 0
+			return min_swap(perm1, np.roll(perm2, perm1.shape[0] - start_idx))
 
-class Individual:
-	"""
-	A class that represents an order in which to visit the cities.
-	This class will represent an individual in the population.
-	"""
+	def eliminate(self, population):
+		"""
+		Eliminate certain Individuals from the given population.
+		:param population: The population to eliminate certain individuals from.
+		:return: The reduced population.
+		"""
+		new_population = []
+		sorted_pop = sorted(population, key= lambda ind: ind.fitness)
 
-	def __init__(self, perm, alpha, beta, fitness, penalty):
-		"""
-		Create a new TSPTour with the specified parameters
-		:param perm: The permutation, this should be a numpy.array containing the order of the cities.
-		:param alpha: The probability that this individual will mutate.
-		:param beta: The probability that this individual will create an offspring.
-		:param fitness: The fitness value for this individual.
-		:param beta: The penalty this Individual should receive.
-		"""
-		self.perm = perm
-		self.alpha = alpha
-		self.beta = beta
-		self.fitness = fitness
-		self.penalty = penalty
-		self.n = self.perm.shape[0]
-		self.next_cities = { self.perm[i] : self.perm[(i+1) % self.n] for i in range(self.n) }
+		for _ in range(self.keep):
+			survivor = sorted_pop.pop(0)
+			new_population.append(survivor)
+			victims = rnd.choices(sorted_pop, k=self.k)
+			sorted_pop.remove(min(victims, key= lambda ind: EliminationOperator.distance(ind.perm, survivor.perm)))
 
-	def mutate(self):
-		"""
-		### CURRENT IMPLEMENTATION: inversion mutation
-		"""
-		(start, end) = random_ind(self.n)
-		self.perm[start:end] = np.flip(self.perm[start:end])
-
-	def get_next(self, city):
-		"""
-		Get the city that follows next to the given city
-		:param city: The number of the city (starting from zero)
-		:return: The number of the city that follows the given city in this Individual.
-		"""
-		return self.next_cities[city]
+		return new_population
 
 class AlgorithmParameters:
 	"""
 	A class that contains all the information to run the genetic algorithm.
-	Attributes:
-		* la: The population size
-		* mu: The amount of tries to create offsprings (not every try will result in offsprings)
-		* init_alpha: The initial vlaue for alpha (the probability of mutation)
-		* init_beta: The initial value for beta (the probability of recombination)
-		* gamma: The probability of performing local search. # TODO: should this be self-adapted?
-		### THESE MIGHT CHANGE
-		* k: the parameter for the k-tournament selection
-		* max_iter: the maximum amount of iterations the algorithm can run
-		* min_std: the minimal standard deviation the population must have
-		* std_tol: the maximum amount of iterations the standard deviations can be lower than min_std
-		* k_opt: the parameter used in k-opt local search
-		* min_dist: the minimal distance two Individuals must have in order to not receive a penalty.
-		* p_exp: the exponent that is used in the fitness sharing penalty calculation
-		* nbh_limit: the amount of neighbours to calculate
 	"""
 
-	def __init__(self, la, mu, init_alpha, init_beta, gamma, k, max_iter, min_std, std_tol, k_opt, min_dist, p_exp, nbh_limit):
+	def __init__(self, la, mu, beta):
+		"""
+		Create a new AlgorithmParameters object.
+		:param la: The population size
+		:param mu: The amount of tries to create offsprings (not every try will result in offsprings)
+		:param beta: The probability that two parents
+		"""
 		self.la = la
 		self.mu = mu
-		self.init_alpha = init_alpha
-		self.init_beta = init_beta
-		self.gamma = gamma
-		self.k = k
-		self.max_iter = max_iter
-		self.min_std = min_std
-		self.std_tol = std_tol
-		self.k_opt = k_opt
-		self.min_dist = min_dist
-		self.p_exp = p_exp
-		self.nbh_limit = nbh_limit
+		self.beta = beta
 
 
 ### UTILITY METHODS
@@ -379,7 +434,6 @@ def random_ind(n):
 	while i1 == i2:
 		i2 = rnd.randrange(0, n)
 	return min(i1, i2), max(i1, i2)
-
 
 def swap_copy(x, i, j):
 	"""
