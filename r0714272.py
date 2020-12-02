@@ -18,7 +18,7 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		self.ap = AlgorithmParameters(la=500, mu=1000, beta=0.9)
+		self.ap = AlgorithmParameters(la=200, mu=300, beta=0.9)
 		tsp = TSP(distance_matrix, self.ap)
 
 		# Initialize the population
@@ -51,11 +51,12 @@ class TSP:
 		self.population = []							# The list of Individual objects
 		self.offsprings = []							# The list that will contain the offsprings
 
-		self.so = SelectionOperator(max(3, int(0.1 * self.n) + 1), 2)
-		self.mo = MutationOperator(0.2, 0.05, self.n, 2)
+		self.so = SelectionOperator(max_k=max(3, int(0.1 * self.n) + 1), min_k=5)
+		self.mo = MutationOperator(max_alpha=0.2, min_alpha=0.05, max_length=self.n, min_length=int(self.n / 10) + 1)
 		self.ro = RecombinationOperator(distance_matrix)
-		self.lso = LocalSearchOperator(self.fitness, 2, 5)
-		self.eo = EliminationOperator(params.la, 2)
+		self.lso = LocalSearchOperator(objf=self.fitness, k=2, nbh_limit=5)
+		self.eo = EliminationOperator(keep=params.la, k=2, elite=2)
+		#self.eo = EliminationOperator2(params.la)
 		self.cc = ConvergenceChecker(10)
 
 	def fitness(self, perm):
@@ -93,7 +94,7 @@ class TSP:
 		"""
 		Eliminate certain Individuals from the population.
 		"""
-		self.population = self.eo.eliminate(self.offsprings)
+		self.population = self.eo.eliminate(self.population, self.offsprings)
 		self.offsprings = []
 
 	def local_search(self):
@@ -140,16 +141,11 @@ class TSP:
 		"""
 		Update the population.
 		"""
-		print("Creating offsprings...")
 		self.create_offsprings()
-		print("Mutating...")
 		self.mutate()
-		print("Local search...")
 		self.local_search()
-		print("Elimination...")
 		self.elimination()
 		(mean_obj, best_obj, _) = self.report_values()
-		print("Updating...")
 		self.so.update(best_obj, mean_obj)
 		self.mo.update(best_obj, mean_obj)
 
@@ -243,6 +239,8 @@ class MutationOperator:
 		"""
 		self.alpha = min(self.max_alpha, max(self.min_alpha, mean_obj / best_obj * self.min_alpha))
 		self.length = round(min(self.max_length, max(self.min_length, mean_obj / best_obj * self.min_length)))
+		print("alpha: {}".format(self.alpha))
+		print("length: {}".format(self.length))
 
 	def mutate(self, perm):
 		"""
@@ -364,14 +362,16 @@ class ConvergenceChecker:
 class EliminationOperator:
 	""" Class that represents an elimination operator. """
 
-	def __init__(self, keep, k):
+	def __init__(self, keep, k, elite):
 		"""
 		Create a new EliminationOperator.
 		:param keep:
 		:param k: The amount of individuals to sample for choosing the victim.
+		:param elite: The amount of individuals that go on to the next generation without doubt
 		"""
 		self.keep = keep
 		self.k = k
+		self.elite = elite
 
 	@staticmethod
 	def distance(perm1, perm2):
@@ -387,22 +387,47 @@ class EliminationOperator:
 		else:
 			return min_swap(perm1, np.roll(perm2, perm1.shape[0] - start_idx))
 
+	def eliminate(self, parents, offsprings):
+		"""
+		Eliminate certain Individuals from the given population.
+		:param parents: The parents of the population.
+		:param offsprings: The offsprings of the population
+		:return: The reduced population.
+		"""
+		new_population = []
+		sorted_parents = sorted(parents, key= lambda ind: ind.fitness)
+		sorted_offsprings = sorted(offsprings, key= lambda ind: ind.fitness)
+
+		elites = [sorted_parents[i] for i in range(self.elite) if sorted_parents[i].fitness < sorted_offsprings[0].fitness]
+		new_population += elites
+
+		for _ in range(len(elites), self.keep):
+			if len(sorted_offsprings) > 0:
+				survivor = sorted_offsprings.pop(0)
+				new_population.append(survivor)
+				victims = rnd.choices(sorted_offsprings, k=self.k)
+				sorted_offsprings.remove(min(victims, key= lambda ind: EliminationOperator.distance(ind.perm, survivor.perm)))
+			else:
+				new_population += sorted_parents[len(elites):len(elites) + self.keep - len(new_population)]
+		return new_population
+
+class EliminationOperator2:
+	""" Class that represents another elimination operator. """
+
+	def __init__(self, keep):
+		"""
+		Create a new EliminationOperator.
+		:param keep: The amount of individuals to keep.
+		"""
+		self.keep = keep
+
 	def eliminate(self, population):
 		"""
 		Eliminate certain Individuals from the given population.
 		:param population: The population to eliminate certain individuals from.
 		:return: The reduced population.
 		"""
-		new_population = []
-		sorted_pop = sorted(population, key= lambda ind: ind.fitness)
-
-		for _ in range(self.keep):
-			survivor = sorted_pop.pop(0)
-			new_population.append(survivor)
-			victims = rnd.choices(sorted_pop, k=self.k)
-			sorted_pop.remove(min(victims, key= lambda ind: EliminationOperator.distance(ind.perm, survivor.perm)))
-
-		return new_population
+		return sorted(population, key= lambda ind: ind.fitness)[0:self.keep]
 
 class AlgorithmParameters:
 	"""
