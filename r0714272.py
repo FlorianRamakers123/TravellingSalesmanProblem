@@ -2,6 +2,12 @@ import Reporter
 import numpy as np
 import random as rnd
 
+### TO-DO-LIST
+# TODO: the chance of mutation should drop towards the end
+# TODO: checkout round robin based elimination
+# TODO: the k should be large in the beginning and small near the end
+# TODO: mutation should have large intervals in the beginning and small in the end
+
 class r0714272:
 
 	def __init__(self):
@@ -15,7 +21,7 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		self.ap = AlgorithmParameters(la=50, mu=100, init_alpha=0.05, init_beta=0.9, k=3, max_iter=500, min_std=0.01, std_tol=100, k_opt=2, gamma=0.0, min_dist=30, p_exp=2, nbh_limit=5)
+		self.ap = AlgorithmParameters(la=50, mu=100, init_alpha=0.1, init_beta=0.9, k=5, max_iter=500, min_std=0.01, std_tol=100, k_opt=2, gamma=0.0, min_dist=30, p_exp=2, nbh_limit=5)
 		tsp = TSP(distance_matrix, self.ap)
 
 		# Initialize the population
@@ -58,8 +64,7 @@ class TSP:
 		:param perm: The order of the cities.
 		:return: The fitness value of the given tour.
 		"""
-		length = perm.shape[0]
-		return sum(self.distance_matrix[int(perm[i % length]), int(perm[(i + 1) % length])] for i in range(length))
+		return np.sum(np.array([self.distance_matrix[perm[i % self.n], perm[(i + 1) % self.n]] for i in range(self.n)]))
 
 	def penalty(self, perm):
 		"""
@@ -84,21 +89,6 @@ class TSP:
 			return min_swap(perm1, np.roll(perm2, -start_idx))
 		else:
 			return min_swap(perm1, np.roll(perm2, self.n - start_idx))
-
-	def distance0(self, perm1, perm2):
-		"""
-		Calculate the distance between two permutations.
-		:param perm1: The first permutations.
-		:param perm2: The second permutations.
-		:return: The distance between the two given permutations.
-		"""
-		start_idx = np.flatnonzero(perm2 == perm1[0])[0]
-		if start_idx < self.n / 2:
-			return np.linalg.norm(perm1 - np.roll(perm2, -start_idx))
-		else:
-			return np.linalg.norm(perm1 - np.roll(perm2, self.n - start_idx))
-
-		#return len({(perm1[i], perm1[(i+1) % self.n]) for i in range(self.n)}.intersection({(perm2[i], perm2[(i+1) % self.n]) for i in range(self.n)}))
 
 	def initialize(self):
 		"""
@@ -160,12 +150,11 @@ class TSP:
 		:param parent2: The second parent.
 		:return: An Individual object that represents the offspring of parent1 and parent2
 		"""
-		m = parent1.perm.shape[0]
-		start = rnd.randrange(0, m)
-		perm_offspring = np.zeros(shape=m, dtype=int)
-		perm_offspring[0] = int(parent1.perm[start])
-		for i in range(1,m):
-			c = int(perm_offspring[i-1])
+		start = rnd.randrange(0, self.n)
+		perm_offspring = np.zeros(shape=self.n, dtype=int)
+		perm_offspring[0] = parent1.perm[start]
+		for i in range(1,self.n):
+			c = perm_offspring[i-1]
 			c1 = parent1.get_next(c)
 			c2 = parent2.get_next(c)
 
@@ -181,9 +170,9 @@ class TSP:
 			elif c2_ok:
 				perm_offspring[i] = c2
 			else:
-				p = int(rnd.choices(parent1.perm)[0])
+				p = rnd.randrange(0, self.n)
 				while p in perm_offspring[0:i]:
-					p = int(rnd.choices(parent1.perm)[0])
+					p = rnd.randrange(0, self.n)
 				perm_offspring[i] = p
 
 		c1 = 2 * (rnd.random() - 0.5)
@@ -323,12 +312,14 @@ class Individual:
 		self.beta = beta
 		self.fitness = fitness
 		self.penalty = penalty
+		self.n = self.perm.shape[0]
+		self.next_cities = { self.perm[i] : self.perm[(i+1) % self.n] for i in range(self.n) }
 
 	def mutate(self):
 		"""
 		### CURRENT IMPLEMENTATION: inversion mutation
 		"""
-		(start, end) = random_ind(self.perm.shape[0])
+		(start, end) = random_ind(self.n)
 		self.perm[start:end] = np.flip(self.perm[start:end])
 
 	def get_next(self, city):
@@ -337,7 +328,7 @@ class Individual:
 		:param city: The number of the city (starting from zero)
 		:return: The number of the city that follows the given city in this Individual.
 		"""
-		return int(self.perm[(np.where(self.perm == city)[0] + 1) % self.perm.shape[0]])
+		return self.next_cities[city]
 
 class AlgorithmParameters:
 	"""
