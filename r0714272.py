@@ -18,7 +18,7 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		self.ap = AlgorithmParameters(la=200, mu=300, beta=0.9)
+		self.ap = AlgorithmParameters(la=100, mu=200, beta=0.9)
 		tsp = TSP(distance_matrix, self.ap)
 
 		# Initialize the population
@@ -39,7 +39,7 @@ class r0714272:
 class TSP:
 	""" A class that represents the evolutionary algorithm used to find solutions to the Travelling Salesman Problem (TSP) """
 
-	def __init__(self, distance_matrix, params, ):
+	def __init__(self, distance_matrix, params):
 		"""
 		Create a new TSPAlgorithm object.
 		:param distance_matrix: The distance matrix that contains the distances between all the cities.
@@ -51,13 +51,13 @@ class TSP:
 		self.population = []							# The list of Individual objects
 		self.offsprings = []							# The list that will contain the offsprings
 
-		self.so = SelectionOperator(max_k=max(3, int(0.1 * self.n) + 1), min_k=5)
-		self.mo = MutationOperator(max_alpha=0.2, min_alpha=0.05, max_length=self.n, min_length=int(self.n / 10) + 1)
+		self.so = SelectionOperator(max_k=max(10, int(0.1 * self.n) + 1), min_k=2)
+		self.mo = MutationOperator(max_alpha=0.5, min_alpha=0.05, base_alpha=0.1, max_length=self.n, min_length=1, base_length=int(self.n / 10) + 1)
 		self.ro = RecombinationOperator(distance_matrix)
-		self.lso = LocalSearchOperator(objf=self.fitness, k=2, nbh_limit=5)
-		self.eo = EliminationOperator(keep=params.la, k=2, elite=2)
-		#self.eo = EliminationOperator2(params.la)
-		self.cc = ConvergenceChecker(10)
+		self.lso = LocalSearchOperator(objf=self.fitness, k=2, min_nbh=5, max_nbh=100, distance_matrix=distance_matrix)
+		self.eo = EliminationOperator(keep=params.la, k=50, elite=1)
+		#self.eo = EliminationOperator2(keep=params.la, q=10)
+		self.cc = ConvergenceChecker(max_slope=-0.000001, weight=0.5)
 
 	def fitness(self, perm):
 		"""
@@ -87,7 +87,7 @@ class TSP:
 		Mutate the population.
 		"""
 		for ind in self.offsprings:
-			if self.mo.mutate(ind.perm):
+			if self.mo.mutate(ind):
 				ind.fitness = self.fitness(ind.perm)
 
 	def elimination(self):
@@ -102,10 +102,7 @@ class TSP:
 		Apply local search to optimize the population.
 		"""
 		for ind in self.offsprings:
-			nbh = self.lso.get_neighbourhood(ind) + [ind]
-			nbh = sorted(nbh, key=lambda i: i.fitness)
-			ind.perm = nbh[0].perm
-			ind.fitness = nbh[0].fitness
+			self.lso.improve(ind)
 
 
 	def has_converged(self):
@@ -113,7 +110,7 @@ class TSP:
 		Check whether the algorithm has converged and should be stopped
 		:return: True if the algorithm should stop, False otherwise
 		"""
-		return not self.cc.should_continue(self.population)
+		return not self.cc.should_continue()
 
 	def report_values(self):
 		"""
@@ -136,19 +133,29 @@ class TSP:
 		mean = mean / len(self.population)
 		return mean, best_fitness, best_individual.perm
 
-
 	def update(self):
 		"""
 		Update the population.
 		"""
+
+		(mean_obj, best_obj, _) = self.report_values()
+		self.cc.update(best_obj)
+		slope_progress = self.cc.get_slope_progress()
+		self.so.update(slope_progress)
+		self.mo.update(best_obj, mean_obj, slope_progress)
+		self.lso.update(slope_progress)
+		#self.params.la = int((1 - slope_progress) * 100 + 30)
+		#self.params.mu = int((1 - slope_progress) * 200 + 60)
+		print("slope: {}".format(self.cc.slope))
+		print("harshness: {}".format(self.mo.harshness))
+		print("k: {}".format(self.lso.k))
+		print("nbh: {}".format(self.lso.nbh))
+		#print("la: {}".format(self.params.la))
+		#print("mu: {}".format(self.params.mu))
 		self.create_offsprings()
 		self.mutate()
 		self.local_search()
 		self.elimination()
-		(mean_obj, best_obj, _) = self.report_values()
-		self.so.update(best_obj, mean_obj)
-		self.mo.update(best_obj, mean_obj)
-
 
 class Individual:
 	"""
@@ -165,7 +172,9 @@ class Individual:
 		self.perm = perm
 		self.fitness = fitness
 		self.n = self.perm.shape[0]
-		self.next_cities = { self.perm[i] : self.perm[(i+1) % self.n] for i in range(self.n) }
+		self.next_cities = np.zeros(self.n, dtype=int)
+		for i in range(self.n):
+			self.next_cities[self.perm[i]] = self.perm[(i+1) % self.n]
 
 	def get_next(self, city):
 		"""
@@ -190,14 +199,14 @@ class SelectionOperator:
 		self.max_k = max_k
 		self.min_k = min_k
 		self.k = max_k
+		self.alpha = max_k
 
-	def update(self, best_obj, mean_obj):
+	def update(self, alpha):
 		"""
 		Update the value of k.
-		:param best_obj: The current best objective
-		:param mean_obj: The current mean objective
+		:param alpha: An interpolation value for k
 		"""
-		self.k = int(min(self.max_k, max(self.min_k, mean_obj / best_obj * self.min_k)))
+		self.k = int(round(self.min_k + alpha * (self.max_k - self.min_k)))
 
 	def select(self, population):
 		"""
@@ -215,43 +224,63 @@ class MutationOperator:
 	This operator is updated to make sure that we have large values for alpha in the beginning and small values near the end.
 	"""
 
-	def __init__(self, max_alpha, min_alpha, max_length, min_length):
+	def __init__(self, max_alpha, min_alpha, base_alpha, max_length, min_length, base_length):
 		"""
-		Create a new SelectionOperator
+		Create a new SelectionOperator.
 		:param max_alpha: The maximal value for parameter alpha.
 		:param min_alpha: The minimal value for parameter alpha.
-		:param max_length: The maximal length of the tour to invert
-		:param min_length: The minimal length of the tour to invert
+		:param base_alpha: The base value for alpha.
+		:param max_length: The maximal length of the tour to invert.
+		:param min_length: The minimal length of the tour to invert.
+		:param base_length: The base value for the length of the inversion.
 		"""
 		self.max_alpha = max_alpha
 		self.min_alpha = min_alpha
-		self.alpha = max_alpha
-
+		self.base_alpha = base_alpha
 		self.max_length = max_length
 		self.min_length = min_length
-		self.length = max_length
+		self.base_length = base_length
+		self.best_obj = 0
+		self.worst_obj = 0
+		self.harshness = 1	# This value indicates how much impact the mutation has on the individual
+							# 0: light impact
+							# 1: heavy impact
 
-	def update(self, best_obj, mean_obj):
+	def update(self, best_obj, worst_obj, harshness):
 		"""
 		Update the value of alpha and the length of the tour to invert.
 		:param best_obj: The current best objective
-		:param mean_obj: The current mean objective
+		:param worst_obj: The current worst objective
+		:param harshness: The new value for the harshness
 		"""
-		self.alpha = min(self.max_alpha, max(self.min_alpha, mean_obj / best_obj * self.min_alpha))
-		self.length = round(min(self.max_length, max(self.min_length, mean_obj / best_obj * self.min_length)))
-		print("alpha: {}".format(self.alpha))
-		print("length: {}".format(self.length))
+		self.best_obj = best_obj
+		self.worst_obj = worst_obj
+		self.harshness = harshness
 
-	def mutate(self, perm):
+	def mutate(self, ind):
 		"""
-		Mutate the given permutation.
-		:param perm: The permutation to mutate.
-		:return: True if the given perm was mutated, False otherwise.
+		Mutate the given Individual.
+		:param ind: The Individual to mutate.
+		:return: True if the given Individual was mutated, False otherwise.
 		"""
-		if rnd.random() <= self.alpha: #TODO: alpha is no longer self-adapted, is this a good idea?
-			(start, end) = random_ind(perm.shape[0])
-			end -= max((end - start) - self.length, 0)
-			perm[start:end] = np.flip(perm[start:end])
+		s = 1
+		if self.worst_obj != self.best_obj:
+			s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
+
+		#if self.harshness <= 0.5:
+		s = max(s ** (1 - self.harshness), self.harshness)
+		#else:
+		#	s = 1.25 * s ** (1 / ((1 - self.harshness) * 2))
+		#s = (1.0 - self.harshness) * s + self.harshness
+		alpha = max(self.min_alpha, min(self.max_alpha, self.min_alpha + 2 * s * (self.max_alpha - self.min_alpha)))
+		length = int(max(self.min_length, min(self.max_length, self.min_length + 2 * s * (self.max_length - self.min_length))))
+		if rnd.random() <= alpha:
+			(start, end) = random_ind(ind.perm.shape[0])
+			end -= max((end - start) - length, 0)
+			if self.harshness > 0.5:
+				np.random.shuffle(ind.perm[start:end])
+			else:
+				ind.perm[start:end] = np.flip(ind.perm[start:end])
 			return True
 		return False
 
@@ -273,6 +302,9 @@ class RecombinationOperator:
 		start = rnd.randrange(0, self.n)
 		perm_offspring = np.zeros(shape=self.n, dtype=int)
 		perm_offspring[0] = parent1.perm[start]
+		available_cities = list(range(self.n))
+		available_cities.remove(perm_offspring[0])
+		rnd.shuffle(available_cities)
 		for i in range(1,self.n):
 			c = perm_offspring[i-1]
 			c1 = parent1.get_next(c)
@@ -290,74 +322,150 @@ class RecombinationOperator:
 			elif c2_ok:
 				perm_offspring[i] = c2
 			else:
-				p = rnd.randrange(0, self.n)
-				while p in perm_offspring[0:i]:
-					p = rnd.randrange(0, self.n)
-				perm_offspring[i] = p
+				perm_offspring[i] = available_cities[0]
+
+			available_cities.remove(perm_offspring[i])
 
 		return perm_offspring
 
 class LocalSearchOperator:
 	""" Class that represents a local search operator. """
 
-	def __init__(self, objf, k, nbh_limit):
+	def __init__(self, objf, k, min_nbh, max_nbh, distance_matrix):
 		"""
 		Create new LocalSearchOperator.
 		:param objf: The objective function to use
-		:param k: The parameter used in k-opt local search.
-		:param nbh_limit: The maximal amount of neighbours to calculate.
+		:param k: The value for the parameter used in k-opt local search.
+		:param min_nbh: The minimal amount of neighbours to calculate.
+		:param min_nbh: The maximal amount of neighbours to calculate.
+		:param distance_matrix: The distance matrix
 		"""
 		self.objf = objf
+		self.min_nbh = min_nbh
+		self.max_nbh = max_nbh
+		self.thoroughness = 0
 		self.k = k
-		self.nbh_limit = nbh_limit
+		self.nbh = min_nbh
+		self.distance_matrix = distance_matrix
+		self.n = distance_matrix.shape[0]
 
-	def get_neighbourhood(self, ind):
+	def update(self, thoroughness):
 		"""
-		Get the entire neighbourhood of the given Individual.
-		:param ind: The individual to calculate the neighbourhood for.
-		:return: A list of individuals that represent the k-level neighbourhood of the given Individual.
+		Update this LocalSearchOperator
+		:param thoroughness: The thoroughness of the search
 		"""
-		nbs = []
-		idx = 0
-		self._get_neighbours(ind, nbs)
-		for i in range(self.k - 1):
-			old_size = len(nbs) - idx
-			for j in range(idx, len(nbs)):
-				self._get_neighbours(nbs[j], nbs)
-			idx += old_size
-		return nbs
+		self.thoroughness = thoroughness
+		self.nbh = int(round(self.min_nbh + self.thoroughness * (self.max_nbh - self.min_nbh)))
+
+	def improve(self, ind):
+		"""
+		Improve the given Individual.
+		:param ind: The Individual to improve.
+		"""
+		(best_swap, best_fitness) = self._get_best_neighbour(ind, self.nbh)
+		if not best_swap is None:
+			ind.perm[(best_swap[0]+1):(best_swap[1])] = np.flip(ind.perm[(best_swap[0]+1):(best_swap[1])])
+
+	def _improve(self, ind, k):
+		if k == 0:
+			return
+
+		nbs_t = self._get_neighbours(ind)
+		nbs = [Individual(flip_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1]) for nb_t in nbs_t]
+		for i in nbs:
+			self._improve(i, k-1)
+
+		best_nb = min(nbs, key= lambda indi: indi.fitness)
+		if best_nb.fitness < ind.fitness:
+			ind.fitness = best_nb.fitness
+			ind.perm = best_nb.perm
 
 
-	def _get_neighbours(self, ind, nbs_list):
+	def _calc_fitness_swap(self, i, j, perm):
+		"""
+		Calculate the new fitness of given permutation if edge i and j were swapped.
+		:param i: The first edge
+		:param j: The second edge
+		:param perm: The permutation to calculate the new fitness of
+		:return: The new fitness of given permutation if edge i and j were swapped.
+		"""
+		b_dist1 = self.distance_matrix[perm[i]][perm[(i + 1) % self.n]]
+		b_dist2 = self.distance_matrix[perm[j]][perm[(j + 1) % self.n]]
+		n_dist1 = self.distance_matrix[perm[i]][perm[j]]
+		n_dist2 = self.distance_matrix[perm[(i + 1) % self.n]][perm[(j + 1) % self.n]]
+
+		return b_dist1+b_dist2, n_dist1 + n_dist2
+
+	def _get_neighbours(self, ind):
 		"""
 		Get the neighbours of the given Individual.
 		:param ind: The Individual to calculate the neighbours for.
-		:param nbs_list: The list to append the neighbours to.
-		:return: A list of all individuals who are one swap away of this individual.
+		:return: A list of ((i,j), f) where (i,j) is the swap and f the fitness.
 		"""
-		swaps = [random_ind(ind.n) for _ in range(self.nbh_limit)]
-		for (i, j) in swaps:
-			perm = flip_copy(ind.perm, i, j)
-			nbs_list.append(Individual(perm, self.objf(perm)))
+		swaps = [random_ind(ind.n) for _ in range(self.nbh)]
+		nbs = []
+		for i, j in swaps:
+			(b_dist,n_dist) = self._calc_fitness_swap(i,j,ind.perm)
+			fitness = ind.fitness - b_dist + n_dist
+			nbs.append(((i,j),fitness))
+
+		return nbs
+
+	def _get_best_neighbour(self, ind, nbh):
+		swaps = [random_ind(ind.n) for _ in range(nbh)]
+		best_fitness = float('inf')
+		best_swap = None
+		for i, j in swaps:
+			(b_dist,n_dist) = self._calc_fitness_swap(i,j,ind.perm)
+			if b_dist < n_dist:
+				fitness = ind.fitness - b_dist + n_dist
+				if fitness < best_fitness:
+					best_fitness = fitness
+					best_swap = (i,j)
+
+
+		return best_swap, best_fitness
 
 class ConvergenceChecker:
 	""" A class for checking if the population has converged. """
 
-	def __init__(self, min_std):
+	def __init__(self, max_slope, weight):
 		"""
 		Create a new ConvergenceChecker.
-		:param min_std: The minimal standard deviation that the population should have.
+		:param max_slope: The minimal slope that the convergence graph should have.
 		"""
-		self.min_std = min_std
+		self.max_slope = max_slope
+		self.best_objs = []
+		self.slope = float("-inf")
+		self.weight = weight
 
-	def should_continue(self, population):
+	def update(self, best_obj):
+		"""
+		Update this ConvergenceChecker
+		:param best_obj: The current best objective
+		"""
+		self.best_objs.append(best_obj)
+		if len(self.best_objs) == 2:
+			self.slope = self.best_objs[1] - self.best_objs[0]
+		elif len(self.best_objs) > 2:
+			self.slope = (1 - self.weight) * self.slope + self.weight * (self.best_objs[-1] - self.best_objs[-2])
+
+	def get_slope_progress(self):
+		"""
+		Get a value between 0 and 1 indicating how far the slope is from its target.
+		:return: A value between 0 and 1 indicating how far the slope is from its target.
+		"""
+		if len(self.best_objs) < 2:
+			return 0
+		min_slope = self.best_objs[0] - self.best_objs[1]
+		return 1 - abs(self.max_slope - self.slope) / abs(self.max_slope - min_slope)
+
+	def should_continue(self):
 		"""
 		Check if the algorithm shoud continue.
-		:param population: The population that is maintained by the algorithm.
 		:return: True if the algorithm should continue, False otherwise.
 		"""
-		fitnesses = [ind.fitness for ind in population]
-		return np.sqrt(np.var(fitnesses)) > self.min_std
+		return self.slope <= self.max_slope
 
 class EliminationOperator:
 	""" Class that represents an elimination operator. """
@@ -405,8 +513,9 @@ class EliminationOperator:
 			if len(sorted_offsprings) > 0:
 				survivor = sorted_offsprings.pop(0)
 				new_population.append(survivor)
-				victims = rnd.choices(sorted_offsprings, k=self.k)
-				sorted_offsprings.remove(min(victims, key= lambda ind: EliminationOperator.distance(ind.perm, survivor.perm)))
+				victims = rnd.choices(sorted_offsprings, k=min(self.k, len(sorted_offsprings)))
+				if len(victims) > 0:
+					sorted_offsprings.remove(min(victims, key= lambda ind: EliminationOperator.distance(ind.perm, survivor.perm)))
 			else:
 				new_population += sorted_parents[len(elites):len(elites) + self.keep - len(new_population)]
 		return new_population
@@ -414,20 +523,31 @@ class EliminationOperator:
 class EliminationOperator2:
 	""" Class that represents another elimination operator. """
 
-	def __init__(self, keep):
+	def __init__(self, keep, q):
 		"""
 		Create a new EliminationOperator.
 		:param keep: The amount of individuals to keep.
+		:param q: the amount of battles to organise
 		"""
 		self.keep = keep
+		self.q = q
 
-	def eliminate(self, population):
+	def eliminate(self, parents, offsprings):
 		"""
 		Eliminate certain Individuals from the given population.
-		:param population: The population to eliminate certain individuals from.
+		:param parents: The parents of the population.
+		:param offsprings: The offsprings of the population.
 		:return: The reduced population.
 		"""
-		return sorted(population, key= lambda ind: ind.fitness)[0:self.keep]
+		pop = parents + offsprings
+		wins = np.zeros(len(pop))
+		for i,ind in enumerate(pop):
+			opponents = rnd.choices(pop, k=self.q)
+			for opp in opponents:
+				if opp.fitness < ind.fitness:
+					wins[i] += 1
+		survivors = sorted(enumerate(pop), key= lambda t: wins[t[0]])[0:self.keep]
+		return [ind for _,ind in survivors]
 
 class AlgorithmParameters:
 	"""
@@ -455,9 +575,7 @@ def random_ind(n):
 	:return: a tuple (i1,i2) where 0 <= i1,i2 < n and i1 != i2
 	"""
 	i1 = rnd.randrange(0, n)
-	i2 = rnd.randrange(0, n)
-	while i1 == i2:
-		i2 = rnd.randrange(0, n)
+	i2 = (i1 + rnd.randrange(0, n)) % n
 	return min(i1, i2), max(i1, i2)
 
 def swap_copy(x, i, j):
@@ -500,7 +618,6 @@ def min_swap(a, b):
 	:return: The minimal amount of swaps that are needed to make b the same as a.
 	"""
 	n = a.shape[0]
-
 	mp = {}
 	for i in range(n):
 		mp[b[i]] = i
