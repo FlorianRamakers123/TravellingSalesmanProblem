@@ -7,7 +7,6 @@ class r0714272:
 
 	def __init__(self):
 		self.reporter = Reporter.Reporter(self.__class__.__name__)
-		self.ap = None
 
 	# The evolutionary algorithm's main loop
 	def optimize(self, filename):
@@ -16,8 +15,7 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		self.ap = AlgorithmParameters(la=50, mu=150, beta=0.9)
-		tsp = TSP(distance_matrix, self.ap)
+		tsp = TSP(distance_matrix)
 
 		# Initialize the population
 		tsp.initialize()
@@ -36,29 +34,83 @@ class r0714272:
 		return 0
 
 class TSP:
-	""" A class that represents the evolutionary algorithm used to find solutions to the Travelling Salesman Problem (TSP) """
+	""" Class that represents an evolutionary algorithm to solve the Travelling Salesman Problem. """
 
-	def __init__(self, distance_matrix, params):
-		"""
-		Create a new TSPAlgorithm object.
-		:param distance_matrix: The distance matrix that contains the distances between all the cities.
-		:param params: A AlgorithmParameters object that contains all the parameter values for executing the algorithm.
-		"""
+	def __init__(self, distance_matrix):
 		self.distance_matrix = distance_matrix
-		self.params = params
-		self.n = distance_matrix.shape[0]				# The length of the tour
-		self.population = []							# The list of Individual objects
-		self.offsprings = []							# The list that will contain the offsprings
+		self.n = distance_matrix.shape[0]
+		self.islands = []
+		self.iteration = 0
 
-		self.slopes = []
-		self.real_slopes = []
-		self.so = SelectionOperator(max_k=max(10, int(0.1 * self.params.la) + 1), min_k=2)
-		self.mo = MutationOperator(max_alpha=0.2, min_alpha=0.01, base_alpha=0.1, max_length=self.n, min_length=1, base_length=int(self.n / 10) + 1)
-		self.ro = RecombinationOperator(distance_matrix)
-		self.lso = LocalSearchOperator(objf=self.fitness, k=2, min_nbh=5, max_nbh=300, distance_matrix=distance_matrix)
-		self.eo = EliminationOperator(keep=params.la, k=10, elite=1)
-		#self.eo = EliminationOperator2(keep=params.la, q=10)
-		self.cc = ConvergenceChecker(max_slope=-0.000001, weight=0.5)
+		### ISLAND 1
+		ap1 = AlgorithmParameters(50, 100, 1.0)
+		so1 = KTournamentSelectionOperator(min_k=5, max_k=20)
+		mo1 = InversionMutationOperator(min_alpha=0.6, max_alpha=1)
+		ro1 = HeuristicCrossoverOperator(distance_matrix)
+		lso1 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=0, max_nbh=5, distance_matrix=distance_matrix)
+		eo1 = EliminationOperator(keep=50, k=5, elite=1)
+		cc1 = ConvergenceChecker(max_slope=-0.000001, weight=0.9)
+		self.islands.append(Island(distance_matrix, ap1, so1, mo1, ro1, lso1, eo1, cc1, self.fitness))
+
+		### ISLAND 2
+		ap2 = AlgorithmParameters(50, 100, 0.9)
+		so2 = KTournamentSelectionOperator(min_k=3, max_k=15)
+		mo2 = InversionMutationOperator(min_alpha=0.25, max_alpha=0.6)
+		ro2 = HeuristicCrossoverOperator(distance_matrix)
+		lso2 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=5, max_nbh=50, distance_matrix=distance_matrix)
+		eo2 = EliminationOperator(keep=50, k=10, elite=3)
+		cc2 = ConvergenceChecker(max_slope=-0.0000001, weight=0.7)
+		self.islands.append(Island(distance_matrix, ap2, so2, mo2, ro2, lso2, eo2, cc2, self.fitness))
+
+		### ISLAND 3
+		ap3 = AlgorithmParameters(50, 100, 0.8)
+		so3 = KTournamentSelectionOperator(min_k=3, max_k=10)
+		mo3 = InversionMutationOperator(min_alpha=0.1, max_alpha=0.6)
+		ro3 = HeuristicCrossoverOperator(distance_matrix)
+		lso3 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=50, max_nbh=150, distance_matrix=distance_matrix)
+		eo3 = EliminationOperator(keep=50, k=30, elite=5)
+		cc3 = ConvergenceChecker(max_slope=-0.00000001, weight=0.6)
+		self.islands.append(Island(distance_matrix, ap3, so3, mo3, ro3, lso3, eo3, cc3, self.fitness))
+
+		### ISLAND 4
+		ap4 = AlgorithmParameters(50, 100, 0.7)
+		so4 = KTournamentSelectionOperator(min_k=2, max_k=5)
+		mo4 = InversionMutationOperator(min_alpha=0.01, max_alpha=0.1)
+		ro4 = HeuristicCrossoverOperator(distance_matrix)
+		lso4 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=150, max_nbh=300, distance_matrix=distance_matrix)
+		eo4 = EliminationOperator(keep=50, k=50, elite=10)
+		cc4 = ConvergenceChecker(max_slope=-0.0000000001, weight=0.5)
+		self.islands.append(Island(distance_matrix, ap4, so4, mo4, ro4, lso4, eo4, cc4, self.fitness))
+
+	def initialize(self):
+		for island in self.islands:
+			island.initialize()
+
+	def update(self):
+		self.iteration += 1
+
+		for island in self.islands:
+			island.update()
+
+		#if self.iteration % 10 == 0:
+		#	for i in range(len(self.islands) - 1):
+		#		self.islands[i+1].population += self.islands[i].get_best()
+
+		#	for i in range(1, len(self.islands)):
+		#		self.islands[i-1].population += self.islands[i].get_worst()
+
+	def report_values(self):
+		values = [island.report_values() for island in self.islands]
+		for i,(mo,bo,_) in enumerate(values):
+			print("[{}]: best = {}, mean = {}".format(i,bo,mo))
+		return min(values, key=lambda v: v[1])
+
+	# TODO: a global slope should be kept and it should use that to check convergence
+	def has_converged(self):
+		for island in self.islands:
+			if not island.has_converged():
+				return False
+		return True
 
 	def fitness(self, perm):
 		"""
@@ -68,12 +120,37 @@ class TSP:
 		"""
 		return np.sum(np.array([self.distance_matrix[perm[i % self.n], perm[(i + 1) % self.n]] for i in range(self.n)]))
 
+
+class Island:
+	""" A class that represents an island of an the evolutionary algorithm. """
+
+	def __init__(self, distance_matrix, params, so, mo, ro, lso, eo, cc, objf):
+		"""
+		Create a new Island object.
+		:param distance_matrix: The distance matrix that contains the distances between all the cities.
+		:param params: A AlgorithmParameters object that contains all the parameter values for executing the algorithm.
+		"""
+		self.distance_matrix = distance_matrix
+		self.params = params
+		self.n = distance_matrix.shape[0]				# The length of the tour
+		self.population = []							# The list of Individual objects
+		self.offsprings = []							# The list that will contain the offsprings
+		self.objf = objf
+		self.so = so
+		self.mo = mo
+		self.ro = ro
+		self.lso = lso
+		self.eo = eo
+		self.cc = cc
+
+
 	def initialize(self):
 		"""
 		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
 		"""
 		permutations = [np.random.permutation(self.n) for _ in range(self.params.la)]
-		self.population = [Individual(permutations[i], self.fitness(permutations[i])) for i in range(self.params.la)]
+		self.population = [Individual(permutations[i], self.objf(permutations[i])) for i in range(self.params.la)]
+		self.local_search()
 
 	def create_offsprings(self):
 		""" Select 2 * mu parents from the population and apply a recombination operator on them. """
@@ -81,7 +158,7 @@ class TSP:
 			if rnd.random() <= self.params.beta:
 				p1,p2 = self.so.select(self.population), self.so.select(self.population)
 				perm_offspring = self.ro.recombine(p1,p2)
-				self.offsprings.append(Individual(perm_offspring, self.fitness(perm_offspring)))
+				self.offsprings.append(Individual(perm_offspring, self.objf(perm_offspring)))
 
 	def mutate(self):
 		"""
@@ -89,7 +166,7 @@ class TSP:
 		"""
 		for ind in self.offsprings:
 			if self.mo.mutate(ind):
-				ind.fitness = self.fitness(ind.perm)
+				ind.fitness = self.objf(ind.perm)
 
 	def elimination(self):
 		"""
@@ -138,29 +215,28 @@ class TSP:
 		"""
 		Update the population.
 		"""
-
 		objs = [ind.fitness for ind in self.population]
 		best_obj = min(objs)
 		worst_obj = max(objs)
-		self.cc.update(best_obj)
 		slope_progress = self.cc.get_slope_progress()
+
+		self.cc.update(best_obj)
 		self.so.update(slope_progress)
 		self.mo.update(best_obj, worst_obj, slope_progress)
 		self.lso.update(best_obj, worst_obj, slope_progress)
-		#self.params.la = int((1 - slope_progress) * 100 + 30)
-		#self.params.mu = int((1 - slope_progress) * 200 + 60)
-		print("slope: {}".format(self.cc.slope))
-		print("harshness: {}".format(self.mo.harshness))
-		print("k: {}".format(self.so.k))
-		print("nbh: {}".format(self.lso.nbh))
-		#print("la: {}".format(self.params.la))
-		#print("mu: {}".format(self.params.mu))
-		self.local_search()
+
+		self.mutate()
 		self.create_offsprings()
 		self.local_search()
-		self.mutate()
-		self.local_search()
 		self.elimination()
+
+		self.population.sort(key=lambda ind: ind.fitness)
+
+	def get_best(self):
+		return self.population[0:10]
+
+	def get_worst(self):
+		return self.population[:-10]
 
 class Individual:
 	"""
@@ -189,7 +265,7 @@ class Individual:
 		"""
 		return self.next_cities[city]
 
-class SelectionOperator:
+class KTournamentSelectionOperator:
 	"""
 	Class that represents a selection operator for a genetic algorithm.
 	This operator is updated to make sure that we have large values for k in the beginning and small values near the end
@@ -197,7 +273,7 @@ class SelectionOperator:
 
 	def __init__(self, max_k, min_k):
 		"""
-		Create a new SelectionOperator
+		Create a new KTournamentSelectionOperator object
 		:param max_k: The maximal value for parameter for the k-tournament selection.
 		:param min_k: The minimal value for parameter for the k-tournament selection.
 		"""
@@ -224,28 +300,20 @@ class SelectionOperator:
 		selected = sorted(selected, key=lambda ind: ind.fitness)
 		return selected[0]
 
-class MutationOperator:
+class InversionMutationOperator:
 	"""
 	Class that represents a mutation operator for a genetic algorithm.
 	This operator is updated to make sure that we have large values for alpha in the beginning and small values near the end.
 	"""
 
-	def __init__(self, max_alpha, min_alpha, base_alpha, max_length, min_length, base_length):
+	def __init__(self, max_alpha, min_alpha):
 		"""
-		Create a new SelectionOperator.
+		Create a new KTournamentSelectionOperator.
 		:param max_alpha: The maximal value for parameter alpha.
 		:param min_alpha: The minimal value for parameter alpha.
-		:param base_alpha: The base value for alpha.
-		:param max_length: The maximal length of the tour to invert.
-		:param min_length: The minimal length of the tour to invert.
-		:param base_length: The base value for the length of the inversion.
 		"""
 		self.max_alpha = max_alpha
 		self.min_alpha = min_alpha
-		self.base_alpha = base_alpha
-		self.max_length = max_length
-		self.min_length = min_length
-		self.base_length = base_length
 		self.best_obj = 0
 		self.worst_obj = 0
 		self.harshness = 1	# This value indicates how much impact the mutation has on the individual
@@ -259,16 +327,7 @@ class MutationOperator:
 		"""
 		self.best_obj = best_obj
 		self.worst_obj = worst_obj
-		#self.harshness = 1 - slope_progress
-		#if slope_progress == 0:
-		#	self.harshness = 1
-		#else:
-		#	self.harshness = min(1, -2 * np.log10(slope_progress))
-		#self.harshness = max(0, 1 / (60 * (slope_progress + (-60.5 / 60))) + 1 - (1 / 60.5))
-		#if slope_progress <= 0.7:
-		#self.harshness = - 2 * np.sqrt(-(slope_progress - 0.5) ** 2 + 0.25) + 1
-		#else:
-		#	self.harshness = 0.5 * (np.power(slope_progress, 1 / 0.026)) - 0.5 * (np.power(1, 1 / 0.026)) + 0.5
+		self.harshness = - 2 * np.sqrt(-(slope_progress - 0.5) ** 2 + 0.25) + 1
 
 	def mutate(self, ind):
 		"""
@@ -289,7 +348,7 @@ class MutationOperator:
 			return True
 		return False
 
-class RecombinationOperator:
+class HeuristicCrossoverOperator:
 	"""
 	Class that represents a recombination operator for a genetic algorithm.
 	"""
@@ -333,12 +392,12 @@ class RecombinationOperator:
 
 		return perm_offspring
 
-class LocalSearchOperator:
+class KOptLocalSearchOperator:
 	""" Class that represents a local search operator. """
 
 	def __init__(self, objf, k, min_nbh, max_nbh, distance_matrix):
 		"""
-		Create new LocalSearchOperator.
+		Create new KOptLocalSearchOperator.
 		:param objf: The objective function to use
 		:param k: The value for the parameter used in k-opt local search.
 		:param min_nbh: The minimal amount of neighbours to calculate.
@@ -358,7 +417,7 @@ class LocalSearchOperator:
 
 	def update(self, best_obj, worst_obj, slope_progress):
 		"""
-		Update this LocalSearchOperator
+		Update this KOptLocalSearchOperator
 		:param best_obj: The current best objective
 		:param worst_obj: The current worst objective
 		:param slope_progress: The current progress of the slope
@@ -525,22 +584,18 @@ class EliminationOperator:
 		new_population += elites
 
 		for _ in range(len(elites), self.keep):
-			if len(sorted_offsprings) > 0:
-				survivor = sorted_offsprings.pop(0)
-				new_population.append(survivor)
-				victims = rnd.choices(sorted_offsprings, k=min(self.k, len(sorted_offsprings)))
-				if len(victims) > 0:
-					sorted_offsprings.remove(min(victims, key= lambda ind: EliminationOperator.distance(ind.perm, survivor.perm)))
-			else:
-				new_population += sorted_parents[len(elites):len(elites) + self.keep - len(new_population)]
+			survivor = sorted_offsprings.pop(0)
+			new_population.append(survivor)
+			victims = rnd.choices(sorted_offsprings, k=min(self.k, len(sorted_offsprings)))
+			sorted_offsprings.remove(min(victims, key= lambda ind: EliminationOperator.distance(ind.perm, survivor.perm)))
 		return new_population
 
-class EliminationOperator2:
+class RoundRobinEliminationOperator:
 	""" Class that represents another elimination operator. """
 
 	def __init__(self, keep, q):
 		"""
-		Create a new EliminationOperator.
+		Create a new RoundRobinEliminationOperator.
 		:param keep: The amount of individuals to keep.
 		:param q: the amount of battles to organise
 		"""

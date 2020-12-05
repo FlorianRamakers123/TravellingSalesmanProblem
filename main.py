@@ -26,8 +26,8 @@ if __name__ == "__main__":
     print("Last best value: {}".format(last_best))
     print("Actual best value: {}".format(actual_best))
 
-    f = open("runs.txt", 'a')
-    f.write("-------------\n{}\nbest={}\nactual best={}\nparameters:{}\n".format(filename, last_best, actual_best, r.ap.__dict__))
+    #f = open("runs.txt", 'a')
+    #f.write("-------------\n{}\nbest={}\nactual best={}\nparameters:{}\n".format(filename, last_best, actual_best, r.ap.__dict__))
 
     plt.plot(iterations, mean_values, label="Mean value")
     plt.plot(iterations, best_values, label="Best value")
