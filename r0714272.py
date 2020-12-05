@@ -1,9 +1,7 @@
 import Reporter
 import numpy as np
 import random as rnd
-
-### TO-DO-LIST
-# TODO: checkout round robin based elimination
+import matplotlib.pyplot as plt
 
 class r0714272:
 
@@ -18,7 +16,7 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		self.ap = AlgorithmParameters(la=100, mu=200, beta=0.9)
+		self.ap = AlgorithmParameters(la=50, mu=150, beta=0.9)
 		tsp = TSP(distance_matrix, self.ap)
 
 		# Initialize the population
@@ -33,6 +31,7 @@ class r0714272:
 				break
 
 			tsp.update()
+
 
 		return 0
 
@@ -51,11 +50,13 @@ class TSP:
 		self.population = []							# The list of Individual objects
 		self.offsprings = []							# The list that will contain the offsprings
 
-		self.so = SelectionOperator(max_k=max(10, int(0.1 * self.n) + 1), min_k=2)
-		self.mo = MutationOperator(max_alpha=0.5, min_alpha=0.05, base_alpha=0.1, max_length=self.n, min_length=1, base_length=int(self.n / 10) + 1)
+		self.slopes = []
+		self.real_slopes = []
+		self.so = SelectionOperator(max_k=max(10, int(0.1 * self.params.la) + 1), min_k=2)
+		self.mo = MutationOperator(max_alpha=0.2, min_alpha=0.01, base_alpha=0.1, max_length=self.n, min_length=1, base_length=int(self.n / 10) + 1)
 		self.ro = RecombinationOperator(distance_matrix)
-		self.lso = LocalSearchOperator(objf=self.fitness, k=2, min_nbh=5, max_nbh=100, distance_matrix=distance_matrix)
-		self.eo = EliminationOperator(keep=params.la, k=50, elite=1)
+		self.lso = LocalSearchOperator(objf=self.fitness, k=2, min_nbh=5, max_nbh=300, distance_matrix=distance_matrix)
+		self.eo = EliminationOperator(keep=params.la, k=10, elite=1)
 		#self.eo = EliminationOperator2(keep=params.la, q=10)
 		self.cc = ConvergenceChecker(max_slope=-0.000001, weight=0.5)
 
@@ -138,21 +139,25 @@ class TSP:
 		Update the population.
 		"""
 
-		(mean_obj, best_obj, _) = self.report_values()
+		objs = [ind.fitness for ind in self.population]
+		best_obj = min(objs)
+		worst_obj = max(objs)
 		self.cc.update(best_obj)
 		slope_progress = self.cc.get_slope_progress()
 		self.so.update(slope_progress)
-		self.mo.update(best_obj, mean_obj, slope_progress)
-		self.lso.update(slope_progress)
+		self.mo.update(best_obj, worst_obj, slope_progress)
+		self.lso.update(best_obj, worst_obj, slope_progress)
 		#self.params.la = int((1 - slope_progress) * 100 + 30)
 		#self.params.mu = int((1 - slope_progress) * 200 + 60)
 		print("slope: {}".format(self.cc.slope))
 		print("harshness: {}".format(self.mo.harshness))
-		print("k: {}".format(self.lso.k))
+		print("k: {}".format(self.so.k))
 		print("nbh: {}".format(self.lso.nbh))
 		#print("la: {}".format(self.params.la))
 		#print("mu: {}".format(self.params.mu))
+		self.local_search()
 		self.create_offsprings()
+		self.local_search()
 		self.mutate()
 		self.local_search()
 		self.elimination()
@@ -201,11 +206,12 @@ class SelectionOperator:
 		self.k = max_k
 		self.alpha = max_k
 
-	def update(self, alpha):
+	def update(self, slope_progress):
 		"""
 		Update the value of k.
-		:param alpha: An interpolation value for k
+		:param slope_progress: The progress of the slope
 		"""
+		alpha = 1 - slope_progress
 		self.k = int(round(self.min_k + alpha * (self.max_k - self.min_k)))
 
 	def select(self, population):
@@ -243,19 +249,26 @@ class MutationOperator:
 		self.best_obj = 0
 		self.worst_obj = 0
 		self.harshness = 1	# This value indicates how much impact the mutation has on the individual
-							# 0: light impact
-							# 1: heavy impact
 
-	def update(self, best_obj, worst_obj, harshness):
+	def update(self, best_obj, worst_obj, slope_progress):
 		"""
 		Update the value of alpha and the length of the tour to invert.
 		:param best_obj: The current best objective
 		:param worst_obj: The current worst objective
-		:param harshness: The new value for the harshness
+		:param slope_progress: The current progress of the slope
 		"""
 		self.best_obj = best_obj
 		self.worst_obj = worst_obj
-		self.harshness = harshness
+		#self.harshness = 1 - slope_progress
+		#if slope_progress == 0:
+		#	self.harshness = 1
+		#else:
+		#	self.harshness = min(1, -2 * np.log10(slope_progress))
+		#self.harshness = max(0, 1 / (60 * (slope_progress + (-60.5 / 60))) + 1 - (1 / 60.5))
+		#if slope_progress <= 0.7:
+		#self.harshness = - 2 * np.sqrt(-(slope_progress - 0.5) ** 2 + 0.25) + 1
+		#else:
+		#	self.harshness = 0.5 * (np.power(slope_progress, 1 / 0.026)) - 0.5 * (np.power(1, 1 / 0.026)) + 0.5
 
 	def mutate(self, ind):
 		"""
@@ -267,20 +280,12 @@ class MutationOperator:
 		if self.worst_obj != self.best_obj:
 			s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
 
-		#if self.harshness <= 0.5:
 		s = max(s ** (1 - self.harshness), self.harshness)
-		#else:
-		#	s = 1.25 * s ** (1 / ((1 - self.harshness) * 2))
-		#s = (1.0 - self.harshness) * s + self.harshness
-		alpha = max(self.min_alpha, min(self.max_alpha, self.min_alpha + 2 * s * (self.max_alpha - self.min_alpha)))
-		length = int(max(self.min_length, min(self.max_length, self.min_length + 2 * s * (self.max_length - self.min_length))))
+
+		alpha = max(self.min_alpha, min(self.max_alpha, self.min_alpha + s * (self.max_alpha - self.min_alpha)))
 		if rnd.random() <= alpha:
 			(start, end) = random_ind(ind.perm.shape[0])
-			end -= max((end - start) - length, 0)
-			if self.harshness > 0.5:
-				np.random.shuffle(ind.perm[start:end])
-			else:
-				ind.perm[start:end] = np.flip(ind.perm[start:end])
+			ind.perm[start:end] = np.flip(ind.perm[start:end])
 			return True
 		return False
 
@@ -348,21 +353,31 @@ class LocalSearchOperator:
 		self.nbh = min_nbh
 		self.distance_matrix = distance_matrix
 		self.n = distance_matrix.shape[0]
+		self.best_obj = 0
+		self.worst_obj = 0
 
-	def update(self, thoroughness):
+	def update(self, best_obj, worst_obj, slope_progress):
 		"""
 		Update this LocalSearchOperator
-		:param thoroughness: The thoroughness of the search
+		:param best_obj: The current best objective
+		:param worst_obj: The current worst objective
+		:param slope_progress: The current progress of the slope
 		"""
-		self.thoroughness = thoroughness
+		self.thoroughness = slope_progress
 		self.nbh = int(round(self.min_nbh + self.thoroughness * (self.max_nbh - self.min_nbh)))
+		self.best_obj = best_obj
+		self.worst_obj = worst_obj
 
 	def improve(self, ind):
 		"""
 		Improve the given Individual.
 		:param ind: The Individual to improve.
 		"""
-		(best_swap, best_fitness) = self._get_best_neighbour(ind, self.nbh)
+		s = 1
+		if self.worst_obj != self.best_obj:
+			s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
+		nbh = int(round(self.min_nbh + s * (self.max_nbh - self.min_nbh)))
+		(best_swap, best_fitness) = self._get_best_neighbour(ind, nbh)
 		if not best_swap is None:
 			ind.perm[(best_swap[0]+1):(best_swap[1])] = np.flip(ind.perm[(best_swap[0]+1):(best_swap[1])])
 
@@ -575,7 +590,10 @@ def random_ind(n):
 	:return: a tuple (i1,i2) where 0 <= i1,i2 < n and i1 != i2
 	"""
 	i1 = rnd.randrange(0, n)
-	i2 = (i1 + rnd.randrange(0, n)) % n
+	i2 = rnd.randrange(0, n)
+	while i1 == i2:
+		i2 = rnd.randrange(0, n)
+
 	return min(i1, i2), max(i1, i2)
 
 def swap_copy(x, i, j):
