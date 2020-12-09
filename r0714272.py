@@ -1,3 +1,5 @@
+from math import isinf
+
 import Reporter
 import numpy as np
 import random as rnd
@@ -97,11 +99,33 @@ class TSP:
 		"""
 		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
 		"""
-		permutations = [np.random.permutation(self.n) for _ in range(self.la)]
+		permutations = self.get_initial_permutations()
 		for i in range(4):
 			self.islands[i].population = [Individual(permutations[j + i*(self.la//4)], self.fitness(permutations[j+ i*(self.la//4)]), 0.1) for j in range(self.la // 4)]
 		#self.population = [Individual(permutations[i], self.fitness(permutations[i])) for i in range(self.la)]
 		self.distribute_population()
+
+	def _get_initial_permutations(self):
+		return [np.random.permutation(self.n) for _ in range(self.la)]
+
+	def get_initial_permutations(self):
+		permutations = []
+		for _ in range(self.la):
+			start = rnd.randrange(0, self.n)
+			available_cities = set(range(self.n))
+			perm = np.zeros(self.n, dtype=int)
+			perm[0] = start
+			available_cities.remove(start)
+			for i in range(1, self.n):
+				perm[i] = min(available_cities, key=lambda city: self.distance_matrix[perm[i-1]][city])
+				available_cities.remove(perm[i])
+			if len(np.unique(perm)) < len(perm):
+				print(perm)
+				raise RuntimeError("NOOOOOO")
+			(i,j) = random_ind(self.n)
+			perm[i+1:j+1] = np.flip(perm[i+1:j+1])
+			permutations.append(perm)
+		return permutations
 
 
 	def distribute_population(self):
@@ -151,6 +175,8 @@ class TSP:
 	def update(self):
 		self.iteration += 1
 
+		print("--------------------- {} ---------------------".format(self.iteration))
+
 		best_obj = min([island.report_values()[1] for island in self.islands])
 		self.cc.update(best_obj)
 
@@ -158,7 +184,7 @@ class TSP:
 			print("updating island...")
 			island.update()
 
-		print("--------------------- {} ---------------------".format(self.iteration))
+
 		if self.iteration % 10 == 0:
 			print("Redistributing population...")
 			self.distribute_population()
@@ -177,8 +203,7 @@ class TSP:
 		return sum(v[0] for v in values) / 4.0, best[1], best[2]
 
 	def has_converged(self):
-		return False
-		#return not self.cc.should_continue()
+		return not self.cc.should_continue()
 
 	def fitness(self, perm):
 		"""
@@ -271,7 +296,8 @@ class Island:
 		best_obj = min(objs)
 		worst_obj = max(objs)
 		slope_progress = self.tsp.cc.get_slope_progress()
-
+		#print("slope_progress = " + str(slope_progress))
+		#print("slope = " + str(self.tsp.cc.slope))
 		self.so.update(slope_progress)
 		self.mo.update(best_obj, worst_obj, slope_progress)
 		self.lso.update(best_obj, worst_obj, slope_progress)
@@ -342,6 +368,7 @@ class KTournamentSelectionOperator:
 		:return: An Individual object that represents a parent.
 		"""
 		selected = rnd.sample(population, k=self.k)
+
 		selected = sorted(selected, key=lambda ind: ind.fitness)
 		return selected[0]
 
@@ -498,7 +525,7 @@ class KOptLocalSearchOperator:
 		#	raise RuntimeError("{} != {} ({},{})".format(fitness, ind.fitness, i, j))
 
 
-	def _improve(self, ind):
+	def __improve(self, ind):
 		"""
 		Improve the given Individual.
 		:param ind: The Individual to improve.
@@ -583,8 +610,9 @@ class ConvergenceChecker:
 		:param max_slope: The minimal slope that the convergence graph should have.
 		"""
 		self.max_slope = max_slope
+		self.min_slope = float('inf')
 		self.best_objs = []
-		self.slope = float("-inf")
+		self.slope = 0
 		self.weight = weight
 
 	def update(self, best_obj):
@@ -593,10 +621,11 @@ class ConvergenceChecker:
 		:param best_obj: The current best objective
 		"""
 		self.best_objs.append(best_obj)
-		if len(self.best_objs) == 2:
-			self.slope = self.best_objs[1] - self.best_objs[0]
-		elif len(self.best_objs) > 2:
-			self.slope = (1 - self.weight) * self.slope + self.weight * (self.best_objs[-1] - self.best_objs[-2])
+		if len(self.best_objs) >= 2:
+			new_slope = self.best_objs[-1] - self.best_objs[-2]
+			if new_slope < self.min_slope:
+				self.min_slope = new_slope
+			self.slope = (1 - self.weight) * self.slope + self.weight * new_slope
 
 	def get_slope_progress(self):
 		"""
@@ -605,15 +634,14 @@ class ConvergenceChecker:
 		"""
 		if len(self.best_objs) < 2:
 			return 0
-		min_slope = self.best_objs[0] - self.best_objs[1]
-		return 1 - abs(self.max_slope - self.slope) / abs(self.max_slope - min_slope)
+		return 1 - abs(self.max_slope - self.slope) / abs(self.max_slope - self.min_slope)
 
 	def should_continue(self):
 		"""
 		Check if the algorithm shoud continue.
 		:return: True if the algorithm should continue, False otherwise.
 		"""
-		return self.slope <= self.max_slope
+		return self.slope <= self.max_slope or self.slope == 0
 
 class EliminationOperator:
 	""" Class that represents an elimination operator. """
