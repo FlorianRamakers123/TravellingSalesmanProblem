@@ -17,15 +17,15 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		rnd.seed(1923971)
-		np.random.seed(1923971)
+		#rnd.seed(1923971)
+		#np.random.seed(1923971)
 
 		tsp = TSP(distance_matrix)
 
 		# Initialize the population
 		tsp.initialize()
 
-		while not tsp.has_converged():
+		while True: #not tsp.has_converged():
 			(mean_obj, best_obj, best_sol) = tsp.report_values()
 			print("mean: {}, best: {}".format(mean_obj, best_obj))
 			time_left = self.reporter.report(mean_obj, best_obj, best_sol)
@@ -54,7 +54,7 @@ class TSP:
 		self.island_bests = [[],[],[],[]]
 		self.iteration = 0
 		self.population = []
-		self.cc = ConvergenceChecker(max_slope=-0.0000001, weight=0.8)
+		self.cc = ConvergenceChecker(max_slope=-0.00000001, weight=0.8)
 		self.la = 100
 		self.mu = 200
 
@@ -64,6 +64,7 @@ class TSP:
 		so1 = KTournamentSelectionOperator(min_k=2, max_k=5)
 		mo1 = InversionMutationOperator(min_alpha=0.15, max_alpha=0.2)
 		ro1 = HeuristicCrossoverOperator(distance_matrix)
+		#ro1 = OrderCrossoverOperator()
 		lso1 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=10, distance_matrix=distance_matrix)
 		eo1 = EliminationOperator(keep=ap1.la, k=ap1.la, elite=5, df=TSP.distance)
 		self.islands.append(Island(distance_matrix, ap1, so1, mo1, ro1, lso1, eo1, self.fitness, self))
@@ -73,6 +74,7 @@ class TSP:
 		so2 = KTournamentSelectionOperator(min_k=2, max_k=5)
 		mo2 = InversionMutationOperator(min_alpha=0.1, max_alpha=0.2)
 		ro2 = HeuristicCrossoverOperator(distance_matrix)
+		#ro2 = OrderCrossoverOperator()
 		lso2 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=20, distance_matrix=distance_matrix)
 		eo2 = EliminationOperator(keep=ap2.la, k=ap2.la, elite=5, df=TSP.distance)
 		self.islands.append(Island(distance_matrix, ap2, so2, mo2, ro2, lso2, eo2, self.fitness, self))
@@ -80,19 +82,23 @@ class TSP:
 		### ISLAND 3
 		ap3 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
 		so3 = KTournamentSelectionOperator(min_k=2, max_k=5)
-		mo3 = InversionMutationOperator(min_alpha=0.1, max_alpha=0.2)
+		mo3 = InversionMutationOperator(min_alpha=0.05, max_alpha=0.2)
 		ro3 = HeuristicCrossoverOperator(distance_matrix)
+		#ro3 = OrderCrossoverOperator()
 		lso3 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=50, distance_matrix=distance_matrix)
-		eo3 = EliminationOperator(keep=ap3.la, k=ap3.la, elite=5, df=TSP.distance)
+		eo3 = RoundRobinEliminationOperator(ap3.la, 2)
+		#eo3 = EliminationOperator(keep=ap3.la, k=ap3.la, elite=5, df=TSP.distance)
 		self.islands.append(Island(distance_matrix, ap3, so3, mo3, ro3, lso3, eo3, self.fitness, self))
 
 		### ISLAND 4
 		ap4 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
 		so4 = KTournamentSelectionOperator(min_k=2, max_k=5)
-		mo4 = InversionMutationOperator(min_alpha=0.01, max_alpha=0.2)
+		mo4 = InversionMutationOperator(min_alpha=0.01, max_alpha=0.1)
 		ro4 = HeuristicCrossoverOperator(distance_matrix)
+		#ro4 = OrderCrossoverOperator()
 		lso4 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=100, distance_matrix=distance_matrix)
-		eo4 = EliminationOperator(keep=ap4.la, k=ap4.la, elite=5, df=TSP.distance)
+		#eo4 = EliminationOperator(keep=ap4.la, k=ap4.la, elite=5, df=TSP.distance)
+		eo4 = RoundRobinEliminationOperator(ap4.la, 2)
 		self.islands.append(Island(distance_matrix, ap4, so4, mo4, ro4, lso4, eo4, self.fitness, self))
 
 	def initialize(self):
@@ -167,9 +173,9 @@ class TSP:
 		"""
 		#start_idx = np.flatnonzero(perm2 == perm1[0])[0]
 		#if start_idx < perm1.shape[0] / 2:
-		#	return min_swap(perm1, np.roll(perm2, -start_idx))
+			#return min_swap(perm1, np.roll(perm2, -start_idx))
 		#else:
-		#	return min_swap(perm1, np.roll(perm2, perm1.shape[0] - start_idx))
+			#return min_swap(perm1, np.roll(perm2, perm1.shape[0] - start_idx))
 		return perm1.shape[0] - 1 - common_edges(perm1, perm2)
 
 	def update(self):
@@ -188,10 +194,10 @@ class TSP:
 		if self.iteration % 10 == 0:
 			print("Redistributing population...")
 			self.distribute_population()
-			values = [island.report_values() for island in self.islands]
-			for i, (mo, bo, _) in enumerate(values):
-				print("[{}]: best = {}, mean = {}".format(i+1, bo, mo))
-				self.island_bests[i].append(bo)
+			#values = [island.report_values() for island in self.islands]
+			#for i, (mo, bo, _) in enumerate(values):
+				#print("[{}]: best = {}, mean = {}".format(i+1, bo, mo))
+				#self.island_bests[i].append(bo)
 
 
 	def report_values(self):
@@ -296,8 +302,8 @@ class Island:
 		best_obj = min(objs)
 		worst_obj = max(objs)
 		slope_progress = self.tsp.cc.get_slope_progress()
-		#print("slope_progress = " + str(slope_progress))
-		#print("slope = " + str(self.tsp.cc.slope))
+		print("slope_progress = " + str(slope_progress))
+		print("slope = " + str(self.tsp.cc.slope))
 		self.so.update(slope_progress)
 		self.mo.update(best_obj, worst_obj, slope_progress)
 		self.lso.update(best_obj, worst_obj, slope_progress)
@@ -306,7 +312,6 @@ class Island:
 		self.create_offsprings()
 		self.local_search()
 		self.elimination()
-
 
 class Individual:
 	"""
@@ -422,9 +427,35 @@ class InversionMutationOperator:
 			return True
 		return False
 
+class OrderCrossoverOperator:
+	"""
+	Class that represents the order crossover operator
+	"""
+
+	def recombine(self, parent1, parent2):
+		"""
+		:param parent1: The first parent.
+		:param parent2: The second parent.
+		:return: An Individual object that represents the offspring of parent1 and parent2
+		"""
+		length = parent1.perm.shape[0]
+		(start, end) = random_ind(length)
+
+		offspring_perm = np.ones(length).astype(int)
+		offspring_perm[start:end + 1] = parent1.perm[start:end + 1]
+
+		k = 0
+
+		for i in range(length):
+			if parent2.perm[(end + i + 1) % length] not in offspring_perm:
+				offspring_perm[(end + k + 1) % length] = parent2.perm[(end + i + 1) % length]
+				k += + 1
+
+		return offspring_perm
+
 class HeuristicCrossoverOperator:
 	"""
-	Class that represents a recombination operator for a genetic algorithm.
+	Class that represents a heuristic recombination operator for a genetic algorithm.
 	"""
 
 	def __init__(self, distance_matrix):
