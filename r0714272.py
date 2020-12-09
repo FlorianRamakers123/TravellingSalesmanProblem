@@ -59,37 +59,37 @@ class TSP:
 
 		### ISLAND 1
 		ap1 = AlgorithmParameters(self.la // 4, self.mu // 4, 1)
-		so1 = KTournamentSelectionOperator(min_k=1, max_k=5)
-		mo1 = InversionMutationOperator(min_alpha=0.6, max_alpha=0.9)
+		so1 = KTournamentSelectionOperator(min_k=2, max_k=5)
+		mo1 = InversionMutationOperator(min_alpha=0.15, max_alpha=0.2)
 		ro1 = HeuristicCrossoverOperator(distance_matrix)
-		lso1 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=0, max_nbh=10, distance_matrix=distance_matrix)
-		eo1 = EliminationOperator(keep=ap1.la, k=ap1.la, elite=0, df=TSP.distance)
+		lso1 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=10, distance_matrix=distance_matrix)
+		eo1 = EliminationOperator(keep=ap1.la, k=ap1.la, elite=5, df=TSP.distance)
 		self.islands.append(Island(distance_matrix, ap1, so1, mo1, ro1, lso1, eo1, self.fitness, self))
 
 		### ISLAND 2
-		ap2 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
-		so2 = KTournamentSelectionOperator(min_k=1, max_k=5)
-		mo2 = InversionMutationOperator(min_alpha=0.3, max_alpha=0.6)
+		ap2 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.9)
+		so2 = KTournamentSelectionOperator(min_k=2, max_k=5)
+		mo2 = InversionMutationOperator(min_alpha=0.1, max_alpha=0.2)
 		ro2 = HeuristicCrossoverOperator(distance_matrix)
-		lso2 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=20, max_nbh=50, distance_matrix=distance_matrix)
+		lso2 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=20, distance_matrix=distance_matrix)
 		eo2 = EliminationOperator(keep=ap2.la, k=ap2.la, elite=5, df=TSP.distance)
 		self.islands.append(Island(distance_matrix, ap2, so2, mo2, ro2, lso2, eo2, self.fitness, self))
 
 		### ISLAND 3
 		ap3 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
-		so3 = KTournamentSelectionOperator(min_k=1, max_k=5)
+		so3 = KTournamentSelectionOperator(min_k=2, max_k=5)
 		mo3 = InversionMutationOperator(min_alpha=0.1, max_alpha=0.2)
 		ro3 = HeuristicCrossoverOperator(distance_matrix)
-		lso3 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=50, max_nbh=100, distance_matrix=distance_matrix)
+		lso3 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=50, distance_matrix=distance_matrix)
 		eo3 = EliminationOperator(keep=ap3.la, k=ap3.la, elite=5, df=TSP.distance)
 		self.islands.append(Island(distance_matrix, ap3, so3, mo3, ro3, lso3, eo3, self.fitness, self))
 
 		### ISLAND 4
 		ap4 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
-		so4 = KTournamentSelectionOperator(min_k=1, max_k=5)
-		mo4 = InversionMutationOperator(min_alpha=0.05, max_alpha=0.1)
+		so4 = KTournamentSelectionOperator(min_k=2, max_k=5)
+		mo4 = InversionMutationOperator(min_alpha=0.01, max_alpha=0.2)
 		ro4 = HeuristicCrossoverOperator(distance_matrix)
-		lso4 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=100, max_nbh=150, distance_matrix=distance_matrix)
+		lso4 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=100, distance_matrix=distance_matrix)
 		eo4 = EliminationOperator(keep=ap4.la, k=ap4.la, elite=5, df=TSP.distance)
 		self.islands.append(Island(distance_matrix, ap4, so4, mo4, ro4, lso4, eo4, self.fitness, self))
 
@@ -99,7 +99,7 @@ class TSP:
 		"""
 		permutations = [np.random.permutation(self.n) for _ in range(self.la)]
 		for i in range(4):
-			self.islands[i].population = [Individual(permutations[j + i*(self.la//4)], self.fitness(permutations[j+ i*(self.la//4)])) for j in range(self.la // 4)]
+			self.islands[i].population = [Individual(permutations[j + i*(self.la//4)], self.fitness(permutations[j+ i*(self.la//4)]), 0.1) for j in range(self.la // 4)]
 		#self.population = [Individual(permutations[i], self.fitness(permutations[i])) for i in range(self.la)]
 		self.distribute_population()
 
@@ -155,6 +155,7 @@ class TSP:
 		self.cc.update(best_obj)
 
 		for island in self.islands:
+			print("updating island...")
 			island.update()
 
 		print("--------------------- {} ---------------------".format(self.iteration))
@@ -172,7 +173,8 @@ class TSP:
 		for i,(mo,bo,_) in enumerate(values):
 			print("[{}]: best = {}, mean = {}".format(i+1,bo,mo))
 			self.island_bests[i].append(bo)
-		return min(values, key=lambda v: v[1])
+		best = min(values, key=lambda v: v[1])
+		return sum(v[0] for v in values) / 4.0, best[1], best[2]
 
 	def has_converged(self):
 		return False
@@ -184,7 +186,7 @@ class TSP:
 		:param perm: The order of the cities.
 		:return: The fitness value of the given tour.
 		"""
-		return np.sum(np.array([self.distance_matrix[perm[i % self.n], perm[(i + 1) % self.n]] for i in range(self.n)]))
+		return np.sum(np.array([self.distance_matrix[perm[i % self.n]][perm[(i + 1) % self.n]] for i in range(self.n)]))
 
 
 class Island:
@@ -215,7 +217,8 @@ class Island:
 			if rnd.random() <= self.params.beta:
 				p1,p2 = self.so.select(self.population), self.so.select(self.population)
 				perm_offspring = self.ro.recombine(p1,p2)
-				self.offsprings.append(Individual(perm_offspring, self.objf(perm_offspring)))
+				new_alpha = p1.alpha + 2 * (rnd.random() - 0.5) * (p1.alpha - p2.alpha)
+				self.offsprings.append(Individual(perm_offspring, self.objf(perm_offspring), new_alpha))
 
 	def mutate(self):
 		"""
@@ -236,7 +239,7 @@ class Island:
 		"""
 		Apply local search to optimize the population.
 		"""
-		for ind in self.offsprings:
+		for ind in self.offsprings + self.population:
 			self.lso.improve(ind)
 
 	def report_values(self):
@@ -285,7 +288,7 @@ class Individual:
 	This class will represent an individual in the population.
 	"""
 
-	def __init__(self, perm, fitness):
+	def __init__(self, perm, fitness, alpha):
 		"""
 		Create a new TSPTour with the specified parameters
 		:param perm: The permutation, this should be a numpy.array containing the order of the cities.
@@ -297,6 +300,7 @@ class Individual:
 		self.next_cities = np.zeros(self.n, dtype=int)
 		for i in range(self.n):
 			self.next_cities[self.perm[i]] = self.perm[(i+1) % self.n]
+		self.alpha = alpha
 
 	def get_next(self, city):
 		"""
@@ -479,16 +483,41 @@ class KOptLocalSearchOperator:
 		#if self.worst_obj != self.best_obj:
 		#	s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
 		#nbh = int(round(self.min_nbh + s * (self.max_nbh - self.min_nbh)))
+		fitness = ind.fitness
+		tries = 0
+		(i,j) = (0,0)
+		while fitness >= ind.fitness and tries < self.nbh:
+			(i,j) = random_ind(ind.n)
+			fitness = self._calc_fitness_swap(i, j, ind.perm, ind.fitness)
+			tries += 1
+
+		if fitness < ind.fitness:
+			ind.perm[(i+1):(j+1)] = np.flip(ind.perm[(i+1):(j+1)])
+			ind.fitness = fitness
+		#if fitness != ind.fitness:
+		#	raise RuntimeError("{} != {} ({},{})".format(fitness, ind.fitness, i, j))
+
+
+	def _improve(self, ind):
+		"""
+		Improve the given Individual.
+		:param ind: The Individual to improve.
+		"""
+		#s = 1
+		#if self.worst_obj != self.best_obj:
+		#	s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
+		#nbh = int(round(self.min_nbh + s * (self.max_nbh - self.min_nbh)))
 		(best_swap, best_fitness) = self._get_best_neighbour(ind, self.nbh)
 		if not best_swap is None:
-			ind.perm[(best_swap[0]+1):(best_swap[1])] = np.flip(ind.perm[(best_swap[0]+1):(best_swap[1])])
+			ind.perm[(best_swap[0]+1):(best_swap[1]+1)] = np.flip(ind.perm[(best_swap[0]+1):(best_swap[1]+1)])
+			ind.fitness = best_fitness
 
-	def _improve(self, ind, k):
+	def _improve(self, ind, k=2):
 		if k == 0:
 			return
 
 		nbs_t = self._get_neighbours(ind)
-		nbs = [Individual(flip_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1]) for nb_t in nbs_t]
+		nbs = [Individual(flip_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1], ind.alpha) for nb_t in nbs_t]
 		for i in nbs:
 			self._improve(i, k-1)
 
@@ -498,7 +527,7 @@ class KOptLocalSearchOperator:
 			ind.perm = best_nb.perm
 
 
-	def _calc_fitness_swap(self, i, j, perm):
+	def _calc_fitness_swap(self, i, j, perm, fitness):
 		"""
 		Calculate the new fitness of given permutation if edge i and j were swapped.
 		:param i: The first edge
@@ -506,12 +535,17 @@ class KOptLocalSearchOperator:
 		:param perm: The permutation to calculate the new fitness of
 		:return: The new fitness of given permutation if edge i and j were swapped.
 		"""
-		b_dist1 = self.distance_matrix[perm[i]][perm[(i + 1) % self.n]]
-		b_dist2 = self.distance_matrix[perm[j]][perm[(j + 1) % self.n]]
-		n_dist1 = self.distance_matrix[perm[i]][perm[j]]
-		n_dist2 = self.distance_matrix[perm[(i + 1) % self.n]][perm[(j + 1) % self.n]]
 
-		return b_dist1+b_dist2, n_dist1 + n_dist2
+		for k in range(i, j+1):
+			fitness -= self.distance_matrix[perm[k]][perm[(k + 1) % self.n]]
+		#fitness -= np.sum(np.array([self.distance_matrix[perm[k]][perm[(k + 1) % self.n]] for k in range(i, j+1)]))
+		fitness += self.distance_matrix[perm[(i + 1) % self.n]][perm[(j + 1) % self.n]]
+		fitness += self.distance_matrix[perm[i]][perm[j]]
+		#fitness += np.sum(np.array([self.distance_matrix[perm[(k+1) % self.n]][perm[k]] for k in range(i+1, j)]))
+
+		for k in range(i+1, j):
+			fitness += self.distance_matrix[perm[(k+1) % self.n]][perm[k]]
+		return fitness
 
 	def _get_neighbours(self, ind):
 		"""
@@ -522,23 +556,20 @@ class KOptLocalSearchOperator:
 		swaps = [random_ind(ind.n) for _ in range(self.nbh)]
 		nbs = []
 		for i, j in swaps:
-			(b_dist,n_dist) = self._calc_fitness_swap(i,j,ind.perm)
-			fitness = ind.fitness - b_dist + n_dist
+			fitness = self._calc_fitness_swap(i,j,ind.perm, ind.fitness)
 			nbs.append(((i,j),fitness))
 
 		return nbs
 
 	def _get_best_neighbour(self, ind, nbh):
 		swaps = [random_ind(ind.n) for _ in range(nbh)]
-		best_fitness = float('inf')
+		best_fitness = ind.fitness
 		best_swap = None
 		for i, j in swaps:
-			(b_dist,n_dist) = self._calc_fitness_swap(i,j,ind.perm)
-			if b_dist < n_dist:
-				fitness = ind.fitness - b_dist + n_dist
-				if fitness < best_fitness:
-					best_fitness = fitness
-					best_swap = (i,j)
+			fitness = self._calc_fitness_swap(i,j,ind.perm, ind.fitness)
+			if fitness < best_fitness:
+				best_fitness = fitness
+				best_swap = (i,j)
 
 
 		return best_swap, best_fitness
