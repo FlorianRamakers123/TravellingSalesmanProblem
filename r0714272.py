@@ -17,15 +17,17 @@ class r0714272:
 		file = open(filename)
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
-		#rnd.seed(1923971)
-		#np.random.seed(1923971)
+		seed = rnd.randrange(0, 1239719)
+		print("SEED = {}".format(seed))
+		rnd.seed(754224)
+		np.random.seed(754224)
 
 		tsp = TSP(distance_matrix)
 
 		# Initialize the population
 		tsp.initialize()
-
-		while True: #not tsp.has_converged():
+		best_sol = None
+		while True: #tsp.should_continue():
 			(mean_obj, best_obj, best_sol) = tsp.report_values()
 			print("mean: {}, best: {}".format(mean_obj, best_obj))
 			time_left = self.reporter.report(mean_obj, best_obj, best_sol)
@@ -34,7 +36,9 @@ class r0714272:
 				break
 
 			tsp.update()
-
+		print(best_sol)
+		if tsp.fitness(best_sol) != best_obj:
+			raise RuntimeError("WRONG SOLUTION")
 		its = list(range(len(tsp.island_bests[0])))
 		for i in range(len(tsp.island_bests)):
 			plt.plot(its, tsp.island_bests[i], label="Island {}".format(i+1))
@@ -54,65 +58,74 @@ class TSP:
 		self.island_bests = [[],[],[],[]]
 		self.iteration = 0
 		self.population = []
-		self.cc = ConvergenceChecker(max_slope=-0.00000001, weight=0.8)
+		self.sc = SlopeChecker(max_slope=-0.00000001, weight=0.8)
 		self.la = 100
 		self.mu = 200
-
+		self.init_beta = 0.8
+		self.exchange_size = 20
+		self.should_redistribute = False
 
 		### ISLAND 1
 		ap1 = AlgorithmParameters(self.la // 4, self.mu // 4, 1)
-		so1 = KTournamentSelectionOperator(min_k=2, max_k=5)
-		mo1 = InversionMutationOperator(min_alpha=0.15, max_alpha=0.2)
+		so1 = KTournamentSelectionOperator(min_k=1, max_k=3)
+		mo1 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
 		ro1 = HeuristicCrossoverOperator(distance_matrix)
 		#ro1 = OrderCrossoverOperator()
-		lso1 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=10, distance_matrix=distance_matrix)
-		eo1 = EliminationOperator(keep=ap1.la, k=ap1.la, elite=5, df=TSP.distance)
-		self.islands.append(Island(distance_matrix, ap1, so1, mo1, ro1, lso1, eo1, self.fitness, self))
+		lso1 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
+		eo1 = EliminationOperator(keep=ap1.la, k=10, elite=5, df=TSP.distance)
+		#eo1 = RoundRobinEliminationOperator(keep=ap1.la, q=10, elite=5)
+		vc1 = VarianceChecker(min_std=0.001)
+		self.islands.append(Island(distance_matrix, ap1, so1, mo1, ro1, lso1, eo1, vc1, self.fitness, self))
 
 		### ISLAND 2
 		ap2 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.9)
-		so2 = KTournamentSelectionOperator(min_k=2, max_k=5)
-		mo2 = InversionMutationOperator(min_alpha=0.1, max_alpha=0.2)
+		so2 = KTournamentSelectionOperator(min_k=1, max_k=3)
+		mo2 = InversionMutationOperator(max_length=self.n - 1)
 		ro2 = HeuristicCrossoverOperator(distance_matrix)
 		#ro2 = OrderCrossoverOperator()
-		lso2 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=20, distance_matrix=distance_matrix)
+		lso2 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
 		eo2 = EliminationOperator(keep=ap2.la, k=ap2.la, elite=5, df=TSP.distance)
-		self.islands.append(Island(distance_matrix, ap2, so2, mo2, ro2, lso2, eo2, self.fitness, self))
+		#eo2 = RoundRobinEliminationOperator(keep=ap2.la, q=10, elite=5)
+		vc2 = VarianceChecker(min_std=0.01)
+		self.islands.append(Island(distance_matrix, ap2, so2, mo2, ro2, lso2, eo2, vc2, self.fitness, self))
 
 		### ISLAND 3
-		ap3 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
-		so3 = KTournamentSelectionOperator(min_k=2, max_k=5)
-		mo3 = InversionMutationOperator(min_alpha=0.05, max_alpha=0.2)
+		ap3 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.5)
+		so3 = KTournamentSelectionOperator(min_k=1, max_k=10)
+		mo3 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
 		ro3 = HeuristicCrossoverOperator(distance_matrix)
 		#ro3 = OrderCrossoverOperator()
-		lso3 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=50, distance_matrix=distance_matrix)
-		eo3 = RoundRobinEliminationOperator(ap3.la, 2)
-		#eo3 = EliminationOperator(keep=ap3.la, k=ap3.la, elite=5, df=TSP.distance)
-		self.islands.append(Island(distance_matrix, ap3, so3, mo3, ro3, lso3, eo3, self.fitness, self))
+		lso3 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
+		#eo3 = RoundRobinEliminationOperator(keep=ap3.la, q=10, elite=5)
+		eo3 = EliminationOperator(keep=ap3.la, k=ap3.la, elite=5, df=TSP.distance)
+		vc3 = VarianceChecker(min_std=0.01)
+		self.islands.append(Island(distance_matrix, ap3, so3, mo3, ro3, lso3, eo3, vc3, self.fitness, self))
 
 		### ISLAND 4
 		ap4 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
-		so4 = KTournamentSelectionOperator(min_k=2, max_k=5)
-		mo4 = InversionMutationOperator(min_alpha=0.01, max_alpha=0.1)
+		so4 = KTournamentSelectionOperator(min_k=1, max_k=3)
+		mo4 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
 		ro4 = HeuristicCrossoverOperator(distance_matrix)
 		#ro4 = OrderCrossoverOperator()
-		lso4 = KOptLocalSearchOperator(objf=self.fitness, k=2, min_nbh=1, max_nbh=100, distance_matrix=distance_matrix)
-		#eo4 = EliminationOperator(keep=ap4.la, k=ap4.la, elite=5, df=TSP.distance)
-		eo4 = RoundRobinEliminationOperator(ap4.la, 2)
-		self.islands.append(Island(distance_matrix, ap4, so4, mo4, ro4, lso4, eo4, self.fitness, self))
+		lso4 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
+		eo4 = EliminationOperator(keep=ap4.la, k=ap4.la, elite=1, df=TSP.distance)
+		#eo4 = RoundRobinEliminationOperator(keep=ap4.la, q=10, elite=5)
+		vc4 = VarianceChecker(min_std=0.01)
+		self.islands.append(Island(distance_matrix, ap4, so4, mo4, ro4, lso4, eo4, vc4, self.fitness, self))
+
 
 	def initialize(self):
 		"""
 		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
 		"""
 		permutations = self.get_initial_permutations()
+		population = [Individual(permutations[j], self.fitness(permutations[j]), self.init_beta) for j in range(self.la)]
 		for i in range(4):
-			self.islands[i].population = [Individual(permutations[j + i*(self.la//4)], self.fitness(permutations[j+ i*(self.la//4)]), 0.1) for j in range(self.la // 4)]
-		#self.population = [Individual(permutations[i], self.fitness(permutations[i])) for i in range(self.la)]
-		self.distribute_population()
+			idx = rnd.randrange(0, len(population))
+			leader = population.pop(idx)
+			population.sort(key=lambda ind: self.distance(ind.perm, leader.perm))
+			self.islands[i].initialize(population[:self.islands[i].params.la])
 
-	def _get_initial_permutations(self):
-		return [np.random.permutation(self.n) for _ in range(self.la)]
 
 	def get_initial_permutations(self):
 		permutations = []
@@ -123,45 +136,18 @@ class TSP:
 			perm[0] = start
 			available_cities.remove(start)
 			for i in range(1, self.n):
-				perm[i] = min(available_cities, key=lambda city: self.distance_matrix[perm[i-1]][city])
+				perm[i] = min(available_cities, key=lambda city: self.distance_matrix[perm[i - 1]][city])
 				available_cities.remove(perm[i])
-			if len(np.unique(perm)) < len(perm):
-				print(perm)
-				raise RuntimeError("NOOOOOO")
-			(i,j) = random_ind(self.n)
-			perm[i+1:j+1] = np.flip(perm[i+1:j+1])
+			(i, j) = random_ind(self.n)
+			perm[i + 1:j + 1] = np.flip(perm[i + 1:j + 1])
 			permutations.append(perm)
 		return permutations
 
-
 	def distribute_population(self):
-		#for i in range(4):
-			#idx = rnd.randrange(0,len(pop))
-			#leader = pop[idx]
-			#pop.sort(key= lambda indi: TSP.distance(indi.perm, leader.perm))
-			#group_members = pop[0:self.size // 4]
-			#self.islands[i].population = group_members
-			#for ind in group_members:
-			#	pop.remove(ind)
-
-		pop = []
-
 		for i in range(4):
-			pop += self.islands[i].population
-		pop.sort(key=lambda ind: ind.fitness)
+			victims = [self.islands[i].population.pop(rnd.randrange(0, len(self.islands[i].population))) for _ in range(self.exchange_size)]
+			self.islands[(i+1) % len(self.islands)].population += victims
 
-		for i in range(4):
-			end = self.la - i * (self.la // 4)
-			start = end - (self.la // 4)
-			self.islands[i].population = pop[start:end]
-
-		#for i in range(0, 3):
-		#	self.islands[i].population.sort(key=lambda ind: ind.fitness)
-		#	self.islands[i+1].population += self.islands[i].population
-
-		#for i in range(3,0,-1):
-		#	self.islands[i].population.sort(key=lambda ind: ind.fitness)
-		#	self.islands[i-1].population += self.islands[i].population
 
 	@staticmethod
 	def distance(perm1, perm2):
@@ -179,37 +165,33 @@ class TSP:
 		return perm1.shape[0] - 1 - common_edges(perm1, perm2)
 
 	def update(self):
-		self.iteration += 1
-
 		print("--------------------- {} ---------------------".format(self.iteration))
-
+		self.iteration += 1
 		best_obj = min([island.report_values()[1] for island in self.islands])
-		self.cc.update(best_obj)
+		self.sc.update(best_obj)
 
 		for island in self.islands:
 			print("updating island...")
 			island.update()
 
-
-		if self.iteration % 10 == 0:
+		if self.iteration % 30 == 0: #.should_redistribute:
 			print("Redistributing population...")
 			self.distribute_population()
-			#values = [island.report_values() for island in self.islands]
-			#for i, (mo, bo, _) in enumerate(values):
-				#print("[{}]: best = {}, mean = {}".format(i+1, bo, mo))
-				#self.island_bests[i].append(bo)
-
+			self.should_redistribute = False
 
 	def report_values(self):
 		values = [island.report_values() for island in self.islands]
-		for i,(mo,bo,_) in enumerate(values):
-			print("[{}]: best = {}, mean = {}".format(i+1,bo,mo))
+		for i,(mo,bo,wo,_) in enumerate(values):
+			print("[{}]: best = {}, mean = {}, worst={}".format(i+1,bo,mo,wo))
 			self.island_bests[i].append(bo)
 		best = min(values, key=lambda v: v[1])
-		return sum(v[0] for v in values) / 4.0, best[1], best[2]
+		return sum(v[0] for v in values) / 4.0, best[1], best[3]
 
-	def has_converged(self):
-		return not self.cc.should_continue()
+	def signal_redistribution(self):
+		self.should_redistribute = True
+
+	def should_continue(self):
+		return self.sc.should_continue()
 
 	def fitness(self, perm):
 		"""
@@ -223,7 +205,7 @@ class TSP:
 class Island:
 	""" A class that represents an island of an the evolutionary algorithm. """
 
-	def __init__(self, distance_matrix, params, so, mo, ro, lso, eo, objf, tsp):
+	def __init__(self, distance_matrix, params, so, mo, ro, lso, eo, vc, objf, tsp):
 		"""
 		Create a new Island object.
 		:param distance_matrix: The distance matrix that contains the distances between all the cities.
@@ -240,23 +222,71 @@ class Island:
 		self.ro = ro
 		self.lso = lso
 		self.eo = eo
+		self.vc = vc
 		self.tsp = tsp
+
+
+		self.best_fitness = 0
+		self.mean_fitness = 0
+		self.worst_fitness = 0
+
+	def initialize(self, population):
+		"""
+		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
+		"""
+		self.population = population
+
 
 	def create_offsprings(self):
 		""" Select 2 * mu parents from the population and apply a recombination operator on them. """
 		while len(self.offsprings) < self.params.mu:
-			if rnd.random() <= self.params.beta:
-				p1,p2 = self.so.select(self.population), self.so.select(self.population)
-				perm_offspring = self.ro.recombine(p1,p2)
-				new_alpha = p1.alpha + 2 * (rnd.random() - 0.5) * (p1.alpha - p2.alpha)
-				self.offsprings.append(Individual(perm_offspring, self.objf(perm_offspring), new_alpha))
+			chance = rnd.random()
+			p1 = self.so.select(self.population)
+			p2 = self.so.select(self.population)
+
+			p1_ready = chance <= p1.beta
+			p2_ready = chance <= p2.beta
+
+			if p1_ready and p2_ready:
+				child = self.create_child(p1, p2)
+				self.offsprings.append(child)
+				p1.beta = min(1.0, max(0.0, child.fitness / p1.fitness * p1.beta))
+				p2.beta = min(1.0, max(0.0, child.fitness / p2.fitness * p2.beta))
+			elif p1_ready:
+				child = self.create_child(p1)
+				self.offsprings.append(child)
+				p1.beta = min(1.0, max(0.0, child.fitness / p1.fitness * p1.beta))
+			elif p2_ready:
+				child = self.create_child(p2)
+				self.offsprings.append(child)
+				p2.beta = min(1.0, max(0.0, child.fitness / p2.fitness * p2.beta))
+
+	def create_child(self, parent1, parent2=None):
+		if parent2 is None:
+			perm_offspring = np.copy(parent1.perm)
+			self.mo.mutate(perm_offspring)
+			new_fitness = self.objf(perm_offspring)
+			new_beta = min(1.0, max(0.0, new_fitness / parent1.fitness * parent1.beta))
+			return Individual(perm_offspring, self.objf(perm_offspring), new_beta)
+		else:
+			perm_offspring = self.ro.recombine(parent1, parent2)
+			new_beta = min(1.0, max(0.0, parent1.beta + 2 * (rnd.random() - 0.5) * (parent2.beta - parent1.beta)))
+			return Individual(perm_offspring, self.objf(perm_offspring), new_beta)
+
 
 	def mutate(self):
 		"""
 		Mutate the population.
 		"""
 		for ind in self.offsprings:
-			if self.mo.mutate(ind):
+			alpha = 0.1
+			mean_dist = ind.fitness - self.mean_fitness
+			if mean_dist < 0:
+				alpha += mean_dist / abs(self.best_fitness - self.mean_fitness) * 0.05
+			else:
+				alpha += mean_dist / abs(self.worst_fitness - self.mean_fitness) * 0.05
+			if rnd.random() <= alpha:
+				self.mo.mutate(ind)
 				ind.fitness = self.objf(ind.perm)
 
 	def elimination(self):
@@ -283,31 +313,29 @@ class Island:
 		:return: A tuple (m, bo, bs) that represent the mean objective, best objective and best solution respectively
 		"""
 		mean = 0
-		best_fitness = -1
+		best_fitness = float('inf')
+		worst_fitness = -1
 		best_individual = None
 		for ind in self.population:
 			f = ind.fitness
 			mean += f
-			if f < best_fitness or best_fitness == -1:
+			if f < best_fitness:
 				best_fitness = f
 				best_individual = ind
+			if f > worst_fitness:
+				worst_fitness = f
 		mean = mean / len(self.population)
-		return mean, best_fitness, best_individual.perm
+		return mean, best_fitness, worst_fitness, best_individual.perm
 
 	def update(self):
 		"""
 		Update the population.
 		"""
-		objs = [ind.fitness for ind in self.population]
-		best_obj = min(objs)
-		worst_obj = max(objs)
-		slope_progress = self.tsp.cc.get_slope_progress()
-		print("slope_progress = " + str(slope_progress))
-		print("slope = " + str(self.tsp.cc.slope))
-		self.so.update(slope_progress)
-		self.mo.update(best_obj, worst_obj, slope_progress)
-		self.lso.update(best_obj, worst_obj, slope_progress)
-
+		self.mean_fitness, self.best_fitness, self.worst_fitness, _ = self.report_values()
+		fitnesses = [ind.fitness for ind in self.population]
+		if self.vc.has_converged(self.mean_fitness, fitnesses):
+			print("norm std = {}".format(self.vc.norm_std))
+			self.tsp.signal_redistribution()
 		self.mutate()
 		self.create_offsprings()
 		self.local_search()
@@ -319,7 +347,7 @@ class Individual:
 	This class will represent an individual in the population.
 	"""
 
-	def __init__(self, perm, fitness, alpha):
+	def __init__(self, perm, fitness, beta):
 		"""
 		Create a new TSPTour with the specified parameters
 		:param perm: The permutation, this should be a numpy.array containing the order of the cities.
@@ -331,7 +359,7 @@ class Individual:
 		self.next_cities = np.zeros(self.n, dtype=int)
 		for i in range(self.n):
 			self.next_cities[self.perm[i]] = self.perm[(i+1) % self.n]
-		self.alpha = alpha
+		self.beta = beta
 
 	def get_next(self, city):
 		"""
@@ -380,52 +408,23 @@ class KTournamentSelectionOperator:
 class InversionMutationOperator:
 	"""
 	Class that represents a mutation operator for a genetic algorithm.
-	This operator is updated to make sure that we have large values for alpha in the beginning and small values near the end.
 	"""
 
-	def __init__(self, max_alpha, min_alpha):
+	def __init__(self, max_length):
 		"""
 		Create a new KTournamentSelectionOperator.
-		:param max_alpha: The maximal value for parameter alpha.
-		:param min_alpha: The minimal value for parameter alpha.
+		:param max_length: The maximum length of inversion.
 		"""
-		self.max_alpha = max_alpha
-		self.min_alpha = min_alpha
-		self.alpha = 0
-		self.best_obj = 0
-		self.worst_obj = 0
-		self.harshness = 1	# This value indicates how much impact the mutation has on the individual
+		self.max_length = max_length
 
-	def update(self, best_obj, worst_obj, slope_progress):
-		"""
-		Update the value of alpha and the length of the tour to invert.
-		:param best_obj: The current best objective
-		:param worst_obj: The current worst objective
-		:param slope_progress: The current progress of the slope
-		"""
-		self.best_obj = best_obj
-		self.worst_obj = worst_obj
-		self.harshness = - 2 * np.sqrt(-(slope_progress - 0.5) ** 2 + 0.25) + 1
-		self.alpha = max(self.min_alpha, min(self.max_alpha, self.min_alpha + self.harshness * (self.max_alpha - self.min_alpha)))
-
-	def mutate(self, ind):
+	def mutate(self, perm):
 		"""
 		Mutate the given Individual.
 		:param ind: The Individual to mutate.
-		:return: True if the given Individual was mutated, False otherwise.
 		"""
-		#s = 1
-		#if self.worst_obj != self.best_obj:
-		#	s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
-
-		#s = max(s ** (1 - self.harshness), self.harshness)
-		#alpha = max(self.min_alpha, min(self.max_alpha, self.min_alpha + s * (self.max_alpha - self.min_alpha)))
-
-		if rnd.random() <= self.alpha:
-			(start, end) = random_ind(ind.perm.shape[0])
-			ind.perm[start:end] = np.flip(ind.perm[start:end])
-			return True
-		return False
+		start = rnd.randrange(perm.shape[0])
+		end = min(start + rnd.randrange(1, self.max_length + 1), perm.shape[0])
+		perm[start:end] = np.flip(perm[start:end])
 
 class OrderCrossoverOperator:
 	"""
@@ -500,7 +499,7 @@ class HeuristicCrossoverOperator:
 class KOptLocalSearchOperator:
 	""" Class that represents a local search operator. """
 
-	def __init__(self, objf, k, min_nbh, max_nbh, distance_matrix):
+	def __init__(self, objf, nbh, distance_matrix):
 		"""
 		Create new KOptLocalSearchOperator.
 		:param objf: The objective function to use
@@ -510,37 +509,16 @@ class KOptLocalSearchOperator:
 		:param distance_matrix: The distance matrix
 		"""
 		self.objf = objf
-		self.min_nbh = min_nbh
-		self.max_nbh = max_nbh
-		self.thoroughness = 0
-		self.k = k
-		self.nbh = min_nbh
+		self.nbh = nbh
 		self.distance_matrix = distance_matrix
 		self.n = distance_matrix.shape[0]
-		self.best_obj = 0
-		self.worst_obj = 0
 
-	def update(self, best_obj, worst_obj, slope_progress):
-		"""
-		Update this KOptLocalSearchOperator
-		:param best_obj: The current best objective
-		:param worst_obj: The current worst objective
-		:param slope_progress: The current progress of the slope
-		"""
-		self.thoroughness = slope_progress
-		self.nbh = int(round(self.min_nbh + self.thoroughness * (self.max_nbh - self.min_nbh)))
-		self.best_obj = best_obj
-		self.worst_obj = worst_obj
 
 	def improve(self, ind):
 		"""
 		Improve the given Individual.
 		:param ind: The Individual to improve.
 		"""
-		#s = 1
-		#if self.worst_obj != self.best_obj:
-		#	s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
-		#nbh = int(round(self.min_nbh + s * (self.max_nbh - self.min_nbh)))
 		fitness = ind.fitness
 		tries = 0
 		(i,j) = (0,0)
@@ -550,10 +528,9 @@ class KOptLocalSearchOperator:
 			tries += 1
 
 		if fitness < ind.fitness:
-			ind.perm[(i+1):(j+1)] = np.flip(ind.perm[(i+1):(j+1)])
+			#ind.perm[(i+1):(j+1)] = np.flip(ind.perm[(i+1):(j+1)])
+			ind.perm[i], ind.perm[j] = ind.perm[j], ind.perm[i]
 			ind.fitness = fitness
-		#if fitness != ind.fitness:
-		#	raise RuntimeError("{} != {} ({},{})".format(fitness, ind.fitness, i, j))
 
 
 	def __improve(self, ind):
@@ -575,17 +552,39 @@ class KOptLocalSearchOperator:
 			return
 
 		nbs_t = self._get_neighbours(ind)
-		nbs = [Individual(flip_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1], ind.alpha) for nb_t in nbs_t]
+		nbs = [Individual(swap_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1], ind.beta) for nb_t in nbs_t]
 		for i in nbs:
 			self._improve(i, k-1)
 
 		best_nb = min(nbs, key= lambda indi: indi.fitness)
 		if best_nb.fitness < ind.fitness:
-			ind.fitness = best_nb.fitness
+			#ind.fitness = best_nb.fitness
+			ind.fitness = self.objf(best_nb.perm)
 			ind.perm = best_nb.perm
 
 
 	def _calc_fitness_swap(self, i, j, perm, fitness):
+		"""
+		Calculate the new fitness of given permutation if edge i and j were swapped.
+		:param i: The first edge
+		:param j: The second edge
+		:param perm: The permutation to calculate the new fitness of
+		:return: The new fitness of given permutation if edge i and j were swapped.
+		"""
+		fitness -= self.distance_matrix[perm[i]][perm[(i + 1) % self.n]]
+		fitness -= self.distance_matrix[perm[(i - 1) % self.n]][perm[i]]
+		fitness -= self.distance_matrix[perm[j]][perm[(j + 1) % self.n]]
+		if i + 1 != j:
+			fitness -= self.distance_matrix[perm[(j - 1) % self.n]][perm[j]]
+		else:
+			fitness += self.distance_matrix[perm[j]][perm[i]]
+		fitness += self.distance_matrix[perm[(i - 1) % self.n]][perm[j]]
+		fitness += self.distance_matrix[perm[j]][perm[(i + 1) % self.n]]
+		fitness += self.distance_matrix[perm[(j - 1) % self.n]][perm[i]]
+		fitness += self.distance_matrix[perm[i]][perm[(j + 1) % self.n]]
+		return fitness
+
+	def _calc_fitness_flip(self, i, j, perm, fitness):
 		"""
 		Calculate the new fitness of given permutation if edge i and j were swapped.
 		:param i: The first edge
@@ -611,11 +610,11 @@ class KOptLocalSearchOperator:
 		:param ind: The Individual to calculate the neighbours for.
 		:return: A list of ((i,j), f) where (i,j) is the swap and f the fitness.
 		"""
-		swaps = [random_ind(ind.n) for _ in range(self.nbh)]
+		swaps = [random_ind(ind.n-1) for _ in range(self.nbh)]
 		nbs = []
 		for i, j in swaps:
-			fitness = self._calc_fitness_swap(i,j,ind.perm, ind.fitness)
-			nbs.append(((i,j),fitness))
+			fitness = self._calc_fitness_swap(i+1,j,ind.perm, ind.fitness)
+			nbs.append(((i+1,j),fitness))
 
 		return nbs
 
@@ -632,12 +631,12 @@ class KOptLocalSearchOperator:
 
 		return best_swap, best_fitness
 
-class ConvergenceChecker:
-	""" A class for checking if the population has converged. """
+class SlopeChecker:
+	""" A class for checking if the slope is still steep enough. """
 
 	def __init__(self, max_slope, weight):
 		"""
-		Create a new ConvergenceChecker.
+		Create a new SlopeChecker.
 		:param max_slope: The minimal slope that the convergence graph should have.
 		"""
 		self.max_slope = max_slope
@@ -648,7 +647,7 @@ class ConvergenceChecker:
 
 	def update(self, best_obj):
 		"""
-		Update this ConvergenceChecker
+		Update this SlopeChecker
 		:param best_obj: The current best objective
 		"""
 		self.best_objs.append(best_obj)
@@ -673,6 +672,21 @@ class ConvergenceChecker:
 		:return: True if the algorithm should continue, False otherwise.
 		"""
 		return self.slope <= self.max_slope or self.slope == 0
+
+class VarianceChecker:
+	""" Class for checking if the convergence of a population is still high enough. """
+
+	def __init__(self, min_std):
+		"""
+		Create a new VarianceChecker
+		:param min_std: The minimum allowed value for the normalized standard deviation to have.
+		"""
+		self.min_std = min_std
+		self.norm_std = min_std + 1
+
+	def has_converged(self, mean, fitnesses):
+		self.norm_std = np.sqrt(np.var(np.array(fitnesses)))
+		return self.norm_std / mean <= self.min_std
 
 class EliminationOperator:
 	""" Class that represents an elimination operator. """
@@ -714,14 +728,16 @@ class EliminationOperator:
 class RoundRobinEliminationOperator:
 	""" Class that represents another elimination operator. """
 
-	def __init__(self, keep, q):
+	def __init__(self, keep, q, elite):
 		"""
 		Create a new RoundRobinEliminationOperator.
 		:param keep: The amount of individuals to keep.
-		:param q: the amount of battles to organise
+		:param q: the amount of battles to organise.
+		:param elite: The amount of parents to pass on to the next generation.
 		"""
 		self.keep = keep
 		self.q = q
+		self.elite = elite
 
 	def eliminate(self, parents, offsprings):
 		"""
@@ -730,15 +746,17 @@ class RoundRobinEliminationOperator:
 		:param offsprings: The offsprings of the population.
 		:return: The reduced population.
 		"""
-		pop = parents + offsprings
-		wins = np.zeros(len(pop))
+		sorted_parents = sorted(parents, key=lambda ind: ind.fitness)
+		elite_group = sorted_parents[:self.elite]
+		pop = sorted_parents[self.elite:] + offsprings
+		losses = np.zeros(len(pop))
 		for i,ind in enumerate(pop):
 			opponents = rnd.sample(pop, k=self.q)
 			for opp in opponents:
 				if opp.fitness < ind.fitness:
-					wins[i] += 1
-		survivors = sorted(enumerate(pop), key= lambda t: wins[t[0]])[0:self.keep]
-		return [ind for _,ind in survivors]
+					losses[i] += 1
+		survivors = sorted(enumerate(pop), key= lambda t: losses[t[0]])[0:self.keep - len(elite_group)]
+		return elite_group + [ind for _,ind in survivors]
 
 class AlgorithmParameters:
 	"""
