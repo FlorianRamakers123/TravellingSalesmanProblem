@@ -19,15 +19,15 @@ class r0714272:
 		file.close()
 		seed = rnd.randrange(0, 1239719)
 		print("SEED = {}".format(seed))
-		rnd.seed(754224)
-		np.random.seed(754224)
+		rnd.seed(seed)
+		np.random.seed(seed)
 
 		tsp = TSP(distance_matrix)
 
 		# Initialize the population
 		tsp.initialize()
 		best_sol = None
-		while True: #tsp.should_continue():
+		while tsp.should_continue():
 			(mean_obj, best_obj, best_sol) = tsp.report_values()
 			print("mean: {}, best: {}".format(mean_obj, best_obj))
 			time_left = self.reporter.report(mean_obj, best_obj, best_sol)
@@ -59,19 +59,21 @@ class TSP:
 		self.iteration = 0
 		self.population = []
 		self.sc = SlopeChecker(max_slope=-0.00000001, weight=0.8)
-		self.la = 100
-		self.mu = 200
+		self.la = 200
+		self.mu = 400
 		self.init_beta = 0.8
-		self.exchange_size = 20
+		self.exchange_size = 10
 		self.should_redistribute = False
 
 		### ISLAND 1
 		ap1 = AlgorithmParameters(self.la // 4, self.mu // 4, 1)
 		so1 = KTournamentSelectionOperator(min_k=1, max_k=3)
-		mo1 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
+		#mo1 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
+		mo1 = HeuristicMutationOperator(distance_matrix)
 		ro1 = HeuristicCrossoverOperator(distance_matrix)
 		#ro1 = OrderCrossoverOperator()
-		lso1 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
+		#lso1 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
+		lso1 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
 		eo1 = EliminationOperator(keep=ap1.la, k=10, elite=5, df=TSP.distance)
 		#eo1 = RoundRobinEliminationOperator(keep=ap1.la, q=10, elite=5)
 		vc1 = VarianceChecker(min_std=0.001)
@@ -80,10 +82,13 @@ class TSP:
 		### ISLAND 2
 		ap2 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.9)
 		so2 = KTournamentSelectionOperator(min_k=1, max_k=3)
-		mo2 = InversionMutationOperator(max_length=self.n - 1)
+		#mo2 = InversionMutationOperator(max_length=self.n - 1)
+		mo2 = HeuristicMutationOperator(distance_matrix)
 		ro2 = HeuristicCrossoverOperator(distance_matrix)
+		ro1 = HeuristicMutationOperator(distance_matrix)
 		#ro2 = OrderCrossoverOperator()
-		lso2 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
+		#lso2 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
+		lso2 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
 		eo2 = EliminationOperator(keep=ap2.la, k=ap2.la, elite=5, df=TSP.distance)
 		#eo2 = RoundRobinEliminationOperator(keep=ap2.la, q=10, elite=5)
 		vc2 = VarianceChecker(min_std=0.01)
@@ -92,10 +97,12 @@ class TSP:
 		### ISLAND 3
 		ap3 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.5)
 		so3 = KTournamentSelectionOperator(min_k=1, max_k=10)
-		mo3 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
+		#mo3 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
+		mo3 = HeuristicMutationOperator(distance_matrix)
 		ro3 = HeuristicCrossoverOperator(distance_matrix)
 		#ro3 = OrderCrossoverOperator()
-		lso3 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
+		#lso3 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
+		lso3 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
 		#eo3 = RoundRobinEliminationOperator(keep=ap3.la, q=10, elite=5)
 		eo3 = EliminationOperator(keep=ap3.la, k=ap3.la, elite=5, df=TSP.distance)
 		vc3 = VarianceChecker(min_std=0.01)
@@ -104,10 +111,12 @@ class TSP:
 		### ISLAND 4
 		ap4 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
 		so4 = KTournamentSelectionOperator(min_k=1, max_k=3)
-		mo4 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
+		#mo4 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
+		mo4 = HeuristicMutationOperator(distance_matrix)
 		ro4 = HeuristicCrossoverOperator(distance_matrix)
 		#ro4 = OrderCrossoverOperator()
-		lso4 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
+		#lso4 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
+		lso4 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
 		eo4 = EliminationOperator(keep=ap4.la, k=ap4.la, elite=1, df=TSP.distance)
 		#eo4 = RoundRobinEliminationOperator(keep=ap4.la, q=10, elite=5)
 		vc4 = VarianceChecker(min_std=0.01)
@@ -200,7 +209,6 @@ class TSP:
 		:return: The fitness value of the given tour.
 		"""
 		return np.sum(np.array([self.distance_matrix[perm[i % self.n]][perm[(i + 1) % self.n]] for i in range(self.n)]))
-
 
 class Island:
 	""" A class that represents an island of an the evolutionary algorithm. """
@@ -339,6 +347,9 @@ class Island:
 		self.mutate()
 		self.create_offsprings()
 		self.local_search()
+		print("improved by local search: {}/{}".format(self.lso.improved, len(self.population) + len(self.offsprings)))
+		print("new best: {}".format(min(self.population, key=lambda ind: ind.fitness).fitness))
+		self.lso.improved = 0
 		self.elimination()
 
 class Individual:
@@ -425,6 +436,17 @@ class InversionMutationOperator:
 		start = rnd.randrange(perm.shape[0])
 		end = min(start + rnd.randrange(1, self.max_length + 1), perm.shape[0])
 		perm[start:end] = np.flip(perm[start:end])
+
+class HeuristicMutationOperator:
+	def __init__(self, distance_matrix):
+		self.distance_matrix = distance_matrix
+		self.n = self.distance_matrix.shape[0]
+
+	def mutate(self, perm):
+		edges = [((i, (i+1) % self.n),self.distance_matrix[perm[i]][perm[(i+1) % self.n]]) for i in range(self.n)]
+		edges.sort(key=lambda e: e[1])
+		for ((i,j),f) in edges[:10]:
+			perm[i],perm[j] = perm[j],perm[i]
 
 class OrderCrossoverOperator:
 	"""
@@ -547,20 +569,17 @@ class KOptLocalSearchOperator:
 			ind.perm[(best_swap[0]+1):(best_swap[1]+1)] = np.flip(ind.perm[(best_swap[0]+1):(best_swap[1]+1)])
 			ind.fitness = best_fitness
 
-	def _improve(self, ind, k=2):
-		if k == 0:
-			return
+	def _improve(self, ind):
+		nbh = self._get_neighbours(ind)
+		nbs = [Individual(flip_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1], ind.beta) for nb_t in nbh]
+		for nb in nbs:
+			nbh += self._get_neighbours(nb)
 
-		nbs_t = self._get_neighbours(ind)
-		nbs = [Individual(swap_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1], ind.beta) for nb_t in nbs_t]
-		for i in nbs:
-			self._improve(i, k-1)
-
-		best_nb = min(nbs, key= lambda indi: indi.fitness)
-		if best_nb.fitness < ind.fitness:
-			#ind.fitness = best_nb.fitness
-			ind.fitness = self.objf(best_nb.perm)
-			ind.perm = best_nb.perm
+		best_nb = min(nbh, key= lambda nbt: nbt[1])
+		if best_nb[1] < ind.fitness:
+			(i,j) = best_nb[0]
+			ind.perm[i+1:j] = np.flip(ind.perm[i+1:j])
+			ind.fitness = self.objf(ind.perm)
 
 
 	def _calc_fitness_swap(self, i, j, perm, fitness):
@@ -610,11 +629,11 @@ class KOptLocalSearchOperator:
 		:param ind: The Individual to calculate the neighbours for.
 		:return: A list of ((i,j), f) where (i,j) is the swap and f the fitness.
 		"""
-		swaps = [random_ind(ind.n-1) for _ in range(self.nbh)]
+		swaps = [random_ind(ind.n) for _ in range(self.nbh)]
 		nbs = []
 		for i, j in swaps:
-			fitness = self._calc_fitness_swap(i+1,j,ind.perm, ind.fitness)
-			nbs.append(((i+1,j),fitness))
+			fitness = self._calc_fitness_flip(i,j,ind.perm, ind.fitness)
+			nbs.append(((i,j),fitness))
 
 		return nbs
 
@@ -630,6 +649,47 @@ class KOptLocalSearchOperator:
 
 
 		return best_swap, best_fitness
+
+class SwapLocalSearchOperator:
+
+	def __init__(self, objf, distance_matrix):
+		"""
+		Create new SwapLocalSearchOperator.
+		:param objf: The objective function to use
+		:param distance_matrix: The distance matrix
+		"""
+		self.objf = objf
+		self.distance_matrix = distance_matrix
+		self.n = distance_matrix.shape[0]
+		self.improved = 0
+
+	def improve(self, ind):
+		best_swap = None
+		best_fitness = ind.fitness
+		for i in range(self.n):
+			fitness = self.calc_swap_fitness(i, ind.perm, ind.fitness)
+			if fitness < best_fitness:
+				best_fitness = fitness
+				best_swap = i
+		if not best_swap is None and best_fitness < ind.fitness:
+			ind.perm[best_swap], ind.perm[(best_swap+1) % self.n] = ind.perm[(best_swap+1) % self.n], ind.perm[best_swap]
+			#print("{} -> {}".format(ind.fitness, best_fitness))
+			ind.fitness = self.objf(ind.perm)
+			if round(ind.fitness, 2) != round(best_fitness, 2):
+				print(ind.fitness)
+				print(best_fitness)
+				raise RuntimeError(best_swap)
+			self.improved += 1
+
+
+	def calc_swap_fitness(self, i, perm, fitness):
+		fitness -= self.distance_matrix[perm[(i - 1) % self.n]][perm[i]]
+		fitness -= self.distance_matrix[perm[i]][perm[(i + 1) % self.n]]
+		fitness -= self.distance_matrix[perm[(i + 1) % self.n]][perm[(i + 2) % self.n]]
+		fitness += self.distance_matrix[perm[(i - 1) % self.n]][perm[(i + 1) % self.n]]
+		fitness += self.distance_matrix[perm[(i + 1) % self.n]][perm[i]]
+		fitness += self.distance_matrix[perm[i]][perm[(i + 2) % self.n]]
+		return fitness
 
 class SlopeChecker:
 	""" A class for checking if the slope is still steep enough. """
@@ -711,11 +771,15 @@ class EliminationOperator:
 		:param offsprings: The offsprings of the population
 		:return: The reduced population.
 		"""
+
+
 		new_population = []
 		sorted_parents = sorted(parents, key= lambda ind: ind.fitness)
 		sorted_offsprings = sorted(offsprings, key= lambda ind: ind.fitness)
 
-		elites = [sorted_parents[i] for i in range(self.elite) if sorted_parents[i].fitness < sorted_offsprings[0].fitness]
+		elites = [sorted_parents.pop(0) if sorted_parents[0].fitness < sorted_offsprings[0].fitness else sorted_offsprings.pop(0) for _ in range(self.elite)]
+
+		#elites = [sorted_parents[i] for i in range(self.elite) if sorted_parents[i].fitness < sorted_offsprings[0].fitness]
 		new_population += elites
 
 		for _ in range(len(elites), self.keep):
@@ -773,7 +837,6 @@ class AlgorithmParameters:
 		self.la = la
 		self.mu = mu
 		self.beta = beta
-
 
 ### UTILITY METHODS
 
