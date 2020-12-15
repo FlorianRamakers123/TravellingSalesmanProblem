@@ -18,127 +18,63 @@ class r0714272:
 		distance_matrix = np.loadtxt(file, delimiter=",")
 		file.close()
 		seed = rnd.randrange(0, 1239719)
+		# best seed: 683676
 		print("SEED = {}".format(seed))
 		rnd.seed(seed)
 		np.random.seed(seed)
 
-		tsp = TSP(distance_matrix)
+		island_params = [IslandParameters(mu=200, epsilon=2, q=5, min_dist=5, k=3)] * 4
+		params = AlgorithmParameters(la=200, init_alpha=0.1, init_beta=0.9, island_params=island_params, exchange_size=10, exchange_rate=30)
+		tsp = TSP(distance_matrix,params)
 
 		# Initialize the population
 		tsp.initialize()
 		best_sol = None
+		best_obj = None
 		while tsp.should_continue():
 			(mean_obj, best_obj, best_sol) = tsp.report_values()
-			print("mean: {}, best: {}".format(mean_obj, best_obj))
 			time_left = self.reporter.report(mean_obj, best_obj, best_sol)
 			if time_left < 0:
 				print("Ran out of time!")
 				break
 
 			tsp.update()
-		print(best_sol)
-		if tsp.fitness(best_sol) != best_obj:
-			raise RuntimeError("WRONG SOLUTION")
-		its = list(range(len(tsp.island_bests[0])))
-		for i in range(len(tsp.island_bests)):
-			plt.plot(its, tsp.island_bests[i], label="Island {}".format(i+1))
 
-		plt.legend()
-		plt.show()
+		real_best = fitness(best_sol)
+		if real_best != best_obj:
+			raise RuntimeError("WRONG SOLUTION: {} != {}".format(real_best, best_obj))
 
 		return 0
 
+
 class TSP:
 	""" Class that represents an evolutionary algorithm to solve the Travelling Salesman Problem. """
-
-	def __init__(self, distance_matrix):
-		self.distance_matrix = distance_matrix
+	distance_matrix = None
+	def __init__(self, distance_matrix, params):
+		TSP.distance_matrix = distance_matrix
 		self.n = distance_matrix.shape[0]
+		self.params = params
 		self.islands = []
-		self.island_bests = [[],[],[],[]]
-		self.iteration = 0
-		self.population = []
-		self.sc = SlopeChecker(max_slope=-0.00000001, weight=0.8)
-		self.la = 200
-		self.mu = 400
-		self.init_beta = 0.8
-		self.exchange_size = 10
-		self.should_redistribute = False
-
-		### ISLAND 1
-		ap1 = AlgorithmParameters(self.la // 4, self.mu // 4, 1)
-		so1 = KTournamentSelectionOperator(min_k=1, max_k=3)
-		#mo1 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
-		mo1 = HeuristicMutationOperator(distance_matrix)
-		ro1 = HeuristicCrossoverOperator(distance_matrix)
-		#ro1 = OrderCrossoverOperator()
-		#lso1 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
-		lso1 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
-		eo1 = EliminationOperator(keep=ap1.la, k=10, elite=5, df=TSP.distance)
-		#eo1 = RoundRobinEliminationOperator(keep=ap1.la, q=10, elite=5)
-		vc1 = VarianceChecker(min_std=0.001)
-		self.islands.append(Island(distance_matrix, ap1, so1, mo1, ro1, lso1, eo1, vc1, self.fitness, self))
-
-		### ISLAND 2
-		ap2 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.9)
-		so2 = KTournamentSelectionOperator(min_k=1, max_k=3)
-		#mo2 = InversionMutationOperator(max_length=self.n - 1)
-		mo2 = HeuristicMutationOperator(distance_matrix)
-		ro2 = HeuristicCrossoverOperator(distance_matrix)
-		ro1 = HeuristicMutationOperator(distance_matrix)
-		#ro2 = OrderCrossoverOperator()
-		#lso2 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
-		lso2 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
-		eo2 = EliminationOperator(keep=ap2.la, k=ap2.la, elite=5, df=TSP.distance)
-		#eo2 = RoundRobinEliminationOperator(keep=ap2.la, q=10, elite=5)
-		vc2 = VarianceChecker(min_std=0.01)
-		self.islands.append(Island(distance_matrix, ap2, so2, mo2, ro2, lso2, eo2, vc2, self.fitness, self))
-
-		### ISLAND 3
-		ap3 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.5)
-		so3 = KTournamentSelectionOperator(min_k=1, max_k=10)
-		#mo3 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
-		mo3 = HeuristicMutationOperator(distance_matrix)
-		ro3 = HeuristicCrossoverOperator(distance_matrix)
-		#ro3 = OrderCrossoverOperator()
-		#lso3 = KOptLocalSearchOperator(objf=self.fitness, nbh=10, distance_matrix=distance_matrix)
-		lso3 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
-		#eo3 = RoundRobinEliminationOperator(keep=ap3.la, q=10, elite=5)
-		eo3 = EliminationOperator(keep=ap3.la, k=ap3.la, elite=5, df=TSP.distance)
-		vc3 = VarianceChecker(min_std=0.01)
-		self.islands.append(Island(distance_matrix, ap3, so3, mo3, ro3, lso3, eo3, vc3, self.fitness, self))
-
-		### ISLAND 4
-		ap4 = AlgorithmParameters(self.la // 4, self.mu // 4, 0.8)
-		so4 = KTournamentSelectionOperator(min_k=1, max_k=3)
-		#mo4 = InversionMutationOperator(max_length=int(self.n / 2) + 1)
-		mo4 = HeuristicMutationOperator(distance_matrix)
-		ro4 = HeuristicCrossoverOperator(distance_matrix)
-		#ro4 = OrderCrossoverOperator()
-		#lso4 = KOptLocalSearchOperator(objf=self.fitness,nbh=10, distance_matrix=distance_matrix)
-		lso4 = SwapLocalSearchOperator(objf=self.fitness, distance_matrix=distance_matrix)
-		eo4 = EliminationOperator(keep=ap4.la, k=ap4.la, elite=1, df=TSP.distance)
-		#eo4 = RoundRobinEliminationOperator(keep=ap4.la, q=10, elite=5)
-		vc4 = VarianceChecker(min_std=0.01)
-		self.islands.append(Island(distance_matrix, ap4, so4, mo4, ro4, lso4, eo4, vc4, self.fitness, self))
-
+		self.sc = SlopeChecker(-0.0000000001, 0.5)
 
 	def initialize(self):
 		"""
 		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
 		"""
 		permutations = self.get_initial_permutations()
-		population = [Individual(permutations[j], self.fitness(permutations[j]), self.init_beta) for j in range(self.la)]
-		for i in range(4):
+		population = [Individual(permutations[j], fitness(permutations[j]), 2 * (rnd.random() - 0.5) * 0.02 + self.params.init_alpha, self.params.init_beta) for j in range(self.params.la)]
+		island_la = int(self.params.la / len(self.params.island_params))
+		for island_params in self.params.island_params:
 			idx = rnd.randrange(0, len(population))
 			leader = population.pop(idx)
-			population.sort(key=lambda ind: self.distance(ind.perm, leader.perm))
-			self.islands[i].initialize(population[:self.islands[i].params.la])
-
+			population.sort(key=lambda ind: distance(ind.perm, leader.perm))
+			island_pop = [population.pop(0) for _ in range(island_la - 1)]
+			island_pop.append(leader)
+			self.islands.append(Island(island_pop, island_params))
 
 	def get_initial_permutations(self):
 		permutations = []
-		for _ in range(self.la):
+		for _ in range(self.params.la):
 			start = rnd.randrange(0, self.n)
 			available_cities = set(range(self.n))
 			perm = np.zeros(self.n, dtype=int)
@@ -148,138 +84,101 @@ class TSP:
 				perm[i] = min(available_cities, key=lambda city: self.distance_matrix[perm[i - 1]][city])
 				available_cities.remove(perm[i])
 			(i, j) = random_ind(self.n)
-			perm[i + 1:j + 1] = np.flip(perm[i + 1:j + 1])
+			flip(perm, i, j)
 			permutations.append(perm)
 		return permutations
 
 	def distribute_population(self):
-		for i in range(4):
-			victims = [self.islands[i].population.pop(rnd.randrange(0, len(self.islands[i].population))) for _ in range(self.exchange_size)]
+		for i in range(len(self.islands)):
+			victims = [self.islands[i].population.pop(rnd.randrange(0, len(self.islands[i].population))) for _ in range(self.params.exchange_size)]
 			self.islands[(i+1) % len(self.islands)].population += victims
 
-
-	@staticmethod
-	def distance(perm1, perm2):
-		"""
-		Calculate the distance between two permutations.
-		:param perm1: The first permutations.
-		:param perm2: The second permutations.
-		:return: The distance between the two given permutations.
-		"""
-		#start_idx = np.flatnonzero(perm2 == perm1[0])[0]
-		#if start_idx < perm1.shape[0] / 2:
-			#return min_swap(perm1, np.roll(perm2, -start_idx))
-		#else:
-			#return min_swap(perm1, np.roll(perm2, perm1.shape[0] - start_idx))
-		return perm1.shape[0] - 1 - common_edges(perm1, perm2)
-
 	def update(self):
-		print("--------------------- {} ---------------------".format(self.iteration))
-		self.iteration += 1
-		best_obj = min([island.report_values()[1] for island in self.islands])
+		print("-------------------------------------")
+		best_obj = min([island.best_individual.fitness for island in self.islands])
 		self.sc.update(best_obj)
 
 		for island in self.islands:
-			print("updating island...")
+			#print("best: {} \t mean: {} \t worst: {}".format(island.best_individual.fitness, island.mean_fitness, island.worst_fitness))
 			island.update()
 
-		if self.iteration % 30 == 0: #.should_redistribute:
-			print("Redistributing population...")
-			self.distribute_population()
-			self.should_redistribute = False
+		best_ind = min([island.best_individual for island in self.islands], key=lambda ind: ind.fitness)
+		print("best: {}, alpha: {}, beta: {}".format(best_ind.fitness, best_ind.alpha, best_ind.beta))
+
+		#if self.iteration % 30 == 0: #.should_redistribute:
+		#	print("Redistributing population...")
+		#	self.distribute_population()
+		#	self.should_redistribute = False
 
 	def report_values(self):
-		values = [island.report_values() for island in self.islands]
-		for i,(mo,bo,wo,_) in enumerate(values):
-			print("[{}]: best = {}, mean = {}, worst={}".format(i+1,bo,mo,wo))
-			self.island_bests[i].append(bo)
-		best = min(values, key=lambda v: v[1])
-		return sum(v[0] for v in values) / 4.0, best[1], best[3]
-
-	def signal_redistribution(self):
-		self.should_redistribute = True
+		best = min([island.best_individual for island in self.islands], key=lambda ind: ind.fitness)
+		return sum(island.mean_fitness for island in self.islands) / 4.0, best.fitness, best.perm
 
 	def should_continue(self):
 		return self.sc.should_continue()
 
-	def fitness(self, perm):
-		"""
-		Calculate the fitness value of the given tour.
-		:param perm: The order of the cities.
-		:return: The fitness value of the given tour.
-		"""
-		return np.sum(np.array([self.distance_matrix[perm[i % self.n]][perm[(i + 1) % self.n]] for i in range(self.n)]))
-
 class Island:
 	""" A class that represents an island of an the evolutionary algorithm. """
 
-	def __init__(self, distance_matrix, params, so, mo, ro, lso, eo, vc, objf, tsp):
+	def __init__(self, population, params):
 		"""
 		Create a new Island object.
-		:param distance_matrix: The distance matrix that contains the distances between all the cities.
-		:param params: A AlgorithmParameters object that contains all the parameter values for executing the algorithm.
 		"""
-		self.distance_matrix = distance_matrix
 		self.params = params
-		self.n = distance_matrix.shape[0]				# The length of the tour
-		self.population = None							# The list of Individual objects
-		self.offsprings = []							# The list that will contain the offsprings
-		self.objf = objf
-		self.so = so
-		self.mo = mo
-		self.ro = ro
-		self.lso = lso
-		self.eo = eo
-		self.vc = vc
-		self.tsp = tsp
-
-
-		self.best_fitness = 0
+		(self.elites, self.peasants) = divide(population, params.epsilon, params.min_dist)
+		self.offsprings = []
+		self.la = len(population)
+		self.best_individual = None
 		self.mean_fitness = 0
 		self.worst_fitness = 0
-
-	def initialize(self, population):
-		"""
-		Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
-		"""
-		self.population = population
-
+		self.distribution = [0.1, 0.2]
+		self.update_statistics()
 
 	def create_offsprings(self):
-		""" Select 2 * mu parents from the population and apply a recombination operator on them. """
-		while len(self.offsprings) < self.params.mu:
+
+		#elite_pool = [(elite1, elite2) for elite1 in self.elites for elite2 in self.elites]
+		elite_pool = [(select(self.elites, self.params.k), select(self.elites, self.params.k)) for _ in range(int(self.distribution[0] * self.params.mu) + 1)]
+		self.do_crossovers(elite_pool)
+
+		elite_peasants_pool = [(select(self.elites, self.params.k), select(self.peasants, self.params.k)) for _ in range(int(self.distribution[1] * self.params.mu) + 1)]
+		self.do_crossovers(elite_peasants_pool)
+
+		peasants_pool = [(select(self.peasants, self.params.k), select(self.peasants, self.params.k)) for _ in range(self.params.mu - len(elite_pool) - len(elite_peasants_pool))]
+		self.do_crossovers(peasants_pool)
+
+
+	def do_crossovers(self, mating_pool):
+		for (parent1, parent2) in mating_pool:
 			chance = rnd.random()
-			p1 = self.so.select(self.population)
-			p2 = self.so.select(self.population)
+			parent1_ready = chance <= parent1.beta
+			parent2_ready = chance <= parent2.beta
 
-			p1_ready = chance <= p1.beta
-			p2_ready = chance <= p2.beta
+			if parent1_ready and parent2_ready and parent1 != parent2:
+				child = self.create_offspring(parent1, parent2)
+				self.offsprings.append(child)
+				parent1.beta = min(1.0, max(0.0, child.fitness / parent1.fitness * parent1.beta))
+				parent2.beta = min(1.0, max(0.0, child.fitness / parent2.fitness * parent2.beta))
+			elif parent1_ready:
+				child = self.create_offspring(parent1)
+				self.offsprings.append(child)
+				parent1.beta = min(1.0, max(0.0, child.fitness / parent1.fitness * parent1.beta))
+			elif parent2_ready:
+				child = self.create_offspring(parent2)
+				self.offsprings.append(child)
+				parent2.beta = min(1.0, max(0.0, child.fitness / parent2.fitness * parent2.beta))
 
-			if p1_ready and p2_ready:
-				child = self.create_child(p1, p2)
-				self.offsprings.append(child)
-				p1.beta = min(1.0, max(0.0, child.fitness / p1.fitness * p1.beta))
-				p2.beta = min(1.0, max(0.0, child.fitness / p2.fitness * p2.beta))
-			elif p1_ready:
-				child = self.create_child(p1)
-				self.offsprings.append(child)
-				p1.beta = min(1.0, max(0.0, child.fitness / p1.fitness * p1.beta))
-			elif p2_ready:
-				child = self.create_child(p2)
-				self.offsprings.append(child)
-				p2.beta = min(1.0, max(0.0, child.fitness / p2.fitness * p2.beta))
-
-	def create_child(self, parent1, parent2=None):
+	def create_offspring(self, parent1, parent2=None):
 		if parent2 is None:
 			perm_offspring = np.copy(parent1.perm)
-			self.mo.mutate(perm_offspring)
-			new_fitness = self.objf(perm_offspring)
+			mutate(perm_offspring, perm_offspring.shape[0]-1) #TODO: what should max_length be?
+			new_fitness = fitness(perm_offspring)
 			new_beta = min(1.0, max(0.0, new_fitness / parent1.fitness * parent1.beta))
-			return Individual(perm_offspring, self.objf(perm_offspring), new_beta)
+			return Individual(perm_offspring, new_fitness, parent1.alpha, new_beta)
 		else:
-			perm_offspring = self.ro.recombine(parent1, parent2)
+			perm_offspring = recombine(parent1.next_cities, parent2.next_cities)
+			new_alpha = min(1.0, max(0.0, parent1.alpha + 2 * (rnd.random() - 0.5) * (parent2.alpha - parent1.alpha)))
 			new_beta = min(1.0, max(0.0, parent1.beta + 2 * (rnd.random() - 0.5) * (parent2.beta - parent1.beta)))
-			return Individual(perm_offspring, self.objf(perm_offspring), new_beta)
+			return Individual(perm_offspring, fitness(perm_offspring), new_alpha, new_beta)
 
 
 	def mutate(self):
@@ -287,31 +186,34 @@ class Island:
 		Mutate the population.
 		"""
 		for ind in self.offsprings:
-			alpha = 0.1
-			mean_dist = ind.fitness - self.mean_fitness
-			if mean_dist < 0:
-				alpha += mean_dist / abs(self.best_fitness - self.mean_fitness) * 0.05
-			else:
-				alpha += mean_dist / abs(self.worst_fitness - self.mean_fitness) * 0.05
-			if rnd.random() <= alpha:
-				self.mo.mutate(ind)
-				ind.fitness = self.objf(ind.perm)
+			if rnd.random() < ind.alpha:
+				mutate(ind.perm, ind.perm.shape[0]-1) #TODO: what should max_length be?
+				ind.fitness = fitness(ind.perm)
 
 	def elimination(self):
 		"""
 		Eliminate certain Individuals from the population.
 		"""
-		self.population = self.eo.eliminate(self.population, self.offsprings)
+		o_elites, o_peasants = divide(self.offsprings, self.params.epsilon, self.params.min_dist)
+		new_population = eliminate(self.elites, self.peasants, o_elites, o_peasants, self.params.q, self.la)
+		self.elites, self.peasants = divide(new_population, self.params.epsilon, self.params.min_dist)
 		self.offsprings = []
 
 	def local_search(self):
 		"""
 		Apply local search to optimize the population.
 		"""
-		for ind in self.offsprings + self.population:
-			self.lso.improve(ind)
+		for ind in self.elites:
+			new_perm, new_fitness = local_search(ind.perm, ind.fitness, ind.k)
+			if not new_perm is None:
+				ind.perm = new_perm
+				ind.fitness = new_fitness
+				#ind.k = 1
+			else:
+				ind.k = min(ind.k + 1, ind.perm.shape[0] - 1)
 
-	def report_values(self):
+
+	def update_statistics(self):
 		"""
 		Return a tuple containing the following:
 			- the mean objective function value of the population
@@ -324,7 +226,7 @@ class Island:
 		best_fitness = float('inf')
 		worst_fitness = -1
 		best_individual = None
-		for ind in self.population:
+		for ind in self.elites + self.peasants:
 			f = ind.fitness
 			mean += f
 			if f < best_fitness:
@@ -332,25 +234,22 @@ class Island:
 				best_individual = ind
 			if f > worst_fitness:
 				worst_fitness = f
-		mean = mean / len(self.population)
-		return mean, best_fitness, worst_fitness, best_individual.perm
+		mean = mean / (len(self.elites) + len(self.peasants))
+
+		self.best_individual = best_individual
+		self.worst_fitness = worst_fitness
+		self.mean_fitness = mean
 
 	def update(self):
 		"""
 		Update the population.
 		"""
-		self.mean_fitness, self.best_fitness, self.worst_fitness, _ = self.report_values()
-		fitnesses = [ind.fitness for ind in self.population]
-		if self.vc.has_converged(self.mean_fitness, fitnesses):
-			print("norm std = {}".format(self.vc.norm_std))
-			self.tsp.signal_redistribution()
-		self.mutate()
 		self.create_offsprings()
+		self.mutate()
 		self.local_search()
-		print("improved by local search: {}/{}".format(self.lso.improved, len(self.population) + len(self.offsprings)))
-		print("new best: {}".format(min(self.population, key=lambda ind: ind.fitness).fitness))
-		self.lso.improved = 0
 		self.elimination()
+		self.update_statistics()
+		print("elites: {}, peasants: {}".format(len(self.elites), len(self.peasants)))
 
 class Individual:
 	"""
@@ -358,19 +257,21 @@ class Individual:
 	This class will represent an individual in the population.
 	"""
 
-	def __init__(self, perm, fitness, beta):
+	def __init__(self, perm, f, alpha, beta):
 		"""
 		Create a new TSPTour with the specified parameters
 		:param perm: The permutation, this should be a numpy.array containing the order of the cities.
 		:param fitness: The fitness value for this individual.
 		"""
 		self.perm = perm
-		self.fitness = fitness
+		self.fitness = f
 		self.n = self.perm.shape[0]
 		self.next_cities = np.zeros(self.n, dtype=int)
 		for i in range(self.n):
 			self.next_cities[self.perm[i]] = self.perm[(i+1) % self.n]
+		self.alpha = alpha
 		self.beta = beta
+		self.k = 2
 
 	def get_next(self, city):
 		"""
@@ -379,317 +280,6 @@ class Individual:
 		:return: The number of the city that follows the given city in this Individual.
 		"""
 		return self.next_cities[city]
-
-class KTournamentSelectionOperator:
-	"""
-	Class that represents a selection operator for a genetic algorithm.
-	This operator is updated to make sure that we have large values for k in the beginning and small values near the end
-	"""
-
-	def __init__(self, max_k, min_k):
-		"""
-		Create a new KTournamentSelectionOperator object
-		:param max_k: The maximal value for parameter for the k-tournament selection.
-		:param min_k: The minimal value for parameter for the k-tournament selection.
-		"""
-		self.max_k = max_k
-		self.min_k = min_k
-		self.k = max_k
-		self.alpha = max_k
-
-	def update(self, slope_progress):
-		"""
-		Update the value of k.
-		:param slope_progress: The progress of the slope
-		"""
-		alpha = 1 - slope_progress
-		self.k = int(round(self.min_k + alpha * (self.max_k - self.min_k)))
-
-	def select(self, population):
-		"""
-		Select a parent from the population for recombination.
-		:param population: The population to choose from
-		:return: An Individual object that represents a parent.
-		"""
-		selected = rnd.sample(population, k=self.k)
-
-		selected = sorted(selected, key=lambda ind: ind.fitness)
-		return selected[0]
-
-class InversionMutationOperator:
-	"""
-	Class that represents a mutation operator for a genetic algorithm.
-	"""
-
-	def __init__(self, max_length):
-		"""
-		Create a new KTournamentSelectionOperator.
-		:param max_length: The maximum length of inversion.
-		"""
-		self.max_length = max_length
-
-	def mutate(self, perm):
-		"""
-		Mutate the given Individual.
-		:param ind: The Individual to mutate.
-		"""
-		start = rnd.randrange(perm.shape[0])
-		end = min(start + rnd.randrange(1, self.max_length + 1), perm.shape[0])
-		perm[start:end] = np.flip(perm[start:end])
-
-class HeuristicMutationOperator:
-	def __init__(self, distance_matrix):
-		self.distance_matrix = distance_matrix
-		self.n = self.distance_matrix.shape[0]
-
-	def mutate(self, perm):
-		edges = [((i, (i+1) % self.n),self.distance_matrix[perm[i]][perm[(i+1) % self.n]]) for i in range(self.n)]
-		edges.sort(key=lambda e: e[1])
-		for ((i,j),f) in edges[:10]:
-			perm[i],perm[j] = perm[j],perm[i]
-
-class OrderCrossoverOperator:
-	"""
-	Class that represents the order crossover operator
-	"""
-
-	def recombine(self, parent1, parent2):
-		"""
-		:param parent1: The first parent.
-		:param parent2: The second parent.
-		:return: An Individual object that represents the offspring of parent1 and parent2
-		"""
-		length = parent1.perm.shape[0]
-		(start, end) = random_ind(length)
-
-		offspring_perm = np.ones(length).astype(int)
-		offspring_perm[start:end + 1] = parent1.perm[start:end + 1]
-
-		k = 0
-
-		for i in range(length):
-			if parent2.perm[(end + i + 1) % length] not in offspring_perm:
-				offspring_perm[(end + k + 1) % length] = parent2.perm[(end + i + 1) % length]
-				k += + 1
-
-		return offspring_perm
-
-class HeuristicCrossoverOperator:
-	"""
-	Class that represents a heuristic recombination operator for a genetic algorithm.
-	"""
-
-	def __init__(self, distance_matrix):
-		self.distance_matrix = distance_matrix
-		self.n = distance_matrix.shape[0]
-
-	def recombine(self, parent1, parent2):
-		"""
-		:param parent1: The first parent permutation.
-		:param parent2: The second parent permutation.
-		:return: An permutation that represents the offspring of parent1 and parent2
-		"""
-		start = rnd.randrange(0, self.n)
-		perm_offspring = np.zeros(shape=self.n, dtype=int)
-		perm_offspring[0] = parent1.perm[start]
-		available_cities = list(range(self.n))
-		available_cities.remove(perm_offspring[0])
-		rnd.shuffle(available_cities)
-		for i in range(1,self.n):
-			c = perm_offspring[i-1]
-			c1 = parent1.get_next(c)
-			c2 = parent2.get_next(c)
-
-			c1_ok = c1 not in perm_offspring[0:i]
-			c2_ok = c2 not in perm_offspring[0:i]
-			if c1_ok and c2_ok:
-				if self.distance_matrix[c][c1] < self.distance_matrix[c][c2]:
-					perm_offspring[i] = c1
-				else:
-					perm_offspring[i] = c2
-			elif c1_ok:
-				perm_offspring[i] = c1
-			elif c2_ok:
-				perm_offspring[i] = c2
-			else:
-				perm_offspring[i] = available_cities[0]
-
-			available_cities.remove(perm_offspring[i])
-
-		return perm_offspring
-
-class KOptLocalSearchOperator:
-	""" Class that represents a local search operator. """
-
-	def __init__(self, objf, nbh, distance_matrix):
-		"""
-		Create new KOptLocalSearchOperator.
-		:param objf: The objective function to use
-		:param k: The value for the parameter used in k-opt local search.
-		:param min_nbh: The minimal amount of neighbours to calculate.
-		:param min_nbh: The maximal amount of neighbours to calculate.
-		:param distance_matrix: The distance matrix
-		"""
-		self.objf = objf
-		self.nbh = nbh
-		self.distance_matrix = distance_matrix
-		self.n = distance_matrix.shape[0]
-
-
-	def improve(self, ind):
-		"""
-		Improve the given Individual.
-		:param ind: The Individual to improve.
-		"""
-		fitness = ind.fitness
-		tries = 0
-		(i,j) = (0,0)
-		while fitness >= ind.fitness and tries < self.nbh:
-			(i,j) = random_ind(ind.n)
-			fitness = self._calc_fitness_swap(i, j, ind.perm, ind.fitness)
-			tries += 1
-
-		if fitness < ind.fitness:
-			#ind.perm[(i+1):(j+1)] = np.flip(ind.perm[(i+1):(j+1)])
-			ind.perm[i], ind.perm[j] = ind.perm[j], ind.perm[i]
-			ind.fitness = fitness
-
-
-	def __improve(self, ind):
-		"""
-		Improve the given Individual.
-		:param ind: The Individual to improve.
-		"""
-		#s = 1
-		#if self.worst_obj != self.best_obj:
-		#	s = abs(ind.fitness - self.best_obj) / abs(self.worst_obj - self.best_obj)
-		#nbh = int(round(self.min_nbh + s * (self.max_nbh - self.min_nbh)))
-		(best_swap, best_fitness) = self._get_best_neighbour(ind, self.nbh)
-		if not best_swap is None:
-			ind.perm[(best_swap[0]+1):(best_swap[1]+1)] = np.flip(ind.perm[(best_swap[0]+1):(best_swap[1]+1)])
-			ind.fitness = best_fitness
-
-	def _improve(self, ind):
-		nbh = self._get_neighbours(ind)
-		nbs = [Individual(flip_copy(ind.perm, nb_t[0][0], nb_t[0][1]), nb_t[1], ind.beta) for nb_t in nbh]
-		for nb in nbs:
-			nbh += self._get_neighbours(nb)
-
-		best_nb = min(nbh, key= lambda nbt: nbt[1])
-		if best_nb[1] < ind.fitness:
-			(i,j) = best_nb[0]
-			ind.perm[i+1:j] = np.flip(ind.perm[i+1:j])
-			ind.fitness = self.objf(ind.perm)
-
-
-	def _calc_fitness_swap(self, i, j, perm, fitness):
-		"""
-		Calculate the new fitness of given permutation if edge i and j were swapped.
-		:param i: The first edge
-		:param j: The second edge
-		:param perm: The permutation to calculate the new fitness of
-		:return: The new fitness of given permutation if edge i and j were swapped.
-		"""
-		fitness -= self.distance_matrix[perm[i]][perm[(i + 1) % self.n]]
-		fitness -= self.distance_matrix[perm[(i - 1) % self.n]][perm[i]]
-		fitness -= self.distance_matrix[perm[j]][perm[(j + 1) % self.n]]
-		if i + 1 != j:
-			fitness -= self.distance_matrix[perm[(j - 1) % self.n]][perm[j]]
-		else:
-			fitness += self.distance_matrix[perm[j]][perm[i]]
-		fitness += self.distance_matrix[perm[(i - 1) % self.n]][perm[j]]
-		fitness += self.distance_matrix[perm[j]][perm[(i + 1) % self.n]]
-		fitness += self.distance_matrix[perm[(j - 1) % self.n]][perm[i]]
-		fitness += self.distance_matrix[perm[i]][perm[(j + 1) % self.n]]
-		return fitness
-
-	def _calc_fitness_flip(self, i, j, perm, fitness):
-		"""
-		Calculate the new fitness of given permutation if edge i and j were swapped.
-		:param i: The first edge
-		:param j: The second edge
-		:param perm: The permutation to calculate the new fitness of
-		:return: The new fitness of given permutation if edge i and j were swapped.
-		"""
-
-		for k in range(i, j+1):
-			fitness -= self.distance_matrix[perm[k]][perm[(k + 1) % self.n]]
-		#fitness -= np.sum(np.array([self.distance_matrix[perm[k]][perm[(k + 1) % self.n]] for k in range(i, j+1)]))
-		fitness += self.distance_matrix[perm[(i + 1) % self.n]][perm[(j + 1) % self.n]]
-		fitness += self.distance_matrix[perm[i]][perm[j]]
-		#fitness += np.sum(np.array([self.distance_matrix[perm[(k+1) % self.n]][perm[k]] for k in range(i+1, j)]))
-
-		for k in range(i+1, j):
-			fitness += self.distance_matrix[perm[(k+1) % self.n]][perm[k]]
-		return fitness
-
-	def _get_neighbours(self, ind):
-		"""
-		Get the neighbours of the given Individual.
-		:param ind: The Individual to calculate the neighbours for.
-		:return: A list of ((i,j), f) where (i,j) is the swap and f the fitness.
-		"""
-		swaps = [random_ind(ind.n) for _ in range(self.nbh)]
-		nbs = []
-		for i, j in swaps:
-			fitness = self._calc_fitness_flip(i,j,ind.perm, ind.fitness)
-			nbs.append(((i,j),fitness))
-
-		return nbs
-
-	def _get_best_neighbour(self, ind, nbh):
-		swaps = [random_ind(ind.n) for _ in range(nbh)]
-		best_fitness = ind.fitness
-		best_swap = None
-		for i, j in swaps:
-			fitness = self._calc_fitness_swap(i,j,ind.perm, ind.fitness)
-			if fitness < best_fitness:
-				best_fitness = fitness
-				best_swap = (i,j)
-
-
-		return best_swap, best_fitness
-
-class SwapLocalSearchOperator:
-
-	def __init__(self, objf, distance_matrix):
-		"""
-		Create new SwapLocalSearchOperator.
-		:param objf: The objective function to use
-		:param distance_matrix: The distance matrix
-		"""
-		self.objf = objf
-		self.distance_matrix = distance_matrix
-		self.n = distance_matrix.shape[0]
-		self.improved = 0
-
-	def improve(self, ind):
-		best_swap = None
-		best_fitness = ind.fitness
-		for i in range(self.n):
-			fitness = self.calc_swap_fitness(i, ind.perm, ind.fitness)
-			if fitness < best_fitness:
-				best_fitness = fitness
-				best_swap = i
-		if not best_swap is None and best_fitness < ind.fitness:
-			ind.perm[best_swap], ind.perm[(best_swap+1) % self.n] = ind.perm[(best_swap+1) % self.n], ind.perm[best_swap]
-			#print("{} -> {}".format(ind.fitness, best_fitness))
-			ind.fitness = self.objf(ind.perm)
-			if round(ind.fitness, 2) != round(best_fitness, 2):
-				print(ind.fitness)
-				print(best_fitness)
-				raise RuntimeError(best_swap)
-			self.improved += 1
-
-
-	def calc_swap_fitness(self, i, perm, fitness):
-		fitness -= self.distance_matrix[perm[(i - 1) % self.n]][perm[i]]
-		fitness -= self.distance_matrix[perm[i]][perm[(i + 1) % self.n]]
-		fitness -= self.distance_matrix[perm[(i + 1) % self.n]][perm[(i + 2) % self.n]]
-		fitness += self.distance_matrix[perm[(i - 1) % self.n]][perm[(i + 1) % self.n]]
-		fitness += self.distance_matrix[perm[(i + 1) % self.n]][perm[i]]
-		fitness += self.distance_matrix[perm[i]][perm[(i + 2) % self.n]]
-		return fitness
 
 class SlopeChecker:
 	""" A class for checking if the slope is still steep enough. """
@@ -733,101 +323,12 @@ class SlopeChecker:
 		"""
 		return self.slope <= self.max_slope or self.slope == 0
 
-class VarianceChecker:
-	""" Class for checking if the convergence of a population is still high enough. """
-
-	def __init__(self, min_std):
-		"""
-		Create a new VarianceChecker
-		:param min_std: The minimum allowed value for the normalized standard deviation to have.
-		"""
-		self.min_std = min_std
-		self.norm_std = min_std + 1
-
-	def has_converged(self, mean, fitnesses):
-		self.norm_std = np.sqrt(np.var(np.array(fitnesses)))
-		return self.norm_std / mean <= self.min_std
-
-class EliminationOperator:
-	""" Class that represents an elimination operator. """
-
-	def __init__(self, keep, k, elite, df):
-		"""
-		Create a new EliminationOperator.
-		:param keep:
-		:param k: The amount of individuals to sample for choosing the victim.
-		:param elite: The amount of individuals that go on to the next generation without doubt
-		:param df: The distance function to use.
-		"""
-		self.keep = keep
-		self.k = k
-		self.elite = elite
-		self.distance = df
-
-	def eliminate(self, parents, offsprings):
-		"""
-		Eliminate certain Individuals from the given population.
-		:param parents: The parents of the population.
-		:param offsprings: The offsprings of the population
-		:return: The reduced population.
-		"""
-
-
-		new_population = []
-		sorted_parents = sorted(parents, key= lambda ind: ind.fitness)
-		sorted_offsprings = sorted(offsprings, key= lambda ind: ind.fitness)
-
-		elites = [sorted_parents.pop(0) if sorted_parents[0].fitness < sorted_offsprings[0].fitness else sorted_offsprings.pop(0) for _ in range(self.elite)]
-
-		#elites = [sorted_parents[i] for i in range(self.elite) if sorted_parents[i].fitness < sorted_offsprings[0].fitness]
-		new_population += elites
-
-		for _ in range(len(elites), self.keep):
-			survivor = sorted_offsprings.pop(0)
-			new_population.append(survivor)
-			victims = rnd.sample(sorted_offsprings, k=min(self.k, len(sorted_offsprings)))
-			sorted_offsprings.remove(min(victims, key= lambda ind: self.distance(ind.perm, survivor.perm)))
-		return new_population
-
-class RoundRobinEliminationOperator:
-	""" Class that represents another elimination operator. """
-
-	def __init__(self, keep, q, elite):
-		"""
-		Create a new RoundRobinEliminationOperator.
-		:param keep: The amount of individuals to keep.
-		:param q: the amount of battles to organise.
-		:param elite: The amount of parents to pass on to the next generation.
-		"""
-		self.keep = keep
-		self.q = q
-		self.elite = elite
-
-	def eliminate(self, parents, offsprings):
-		"""
-		Eliminate certain Individuals from the given population.
-		:param parents: The parents of the population.
-		:param offsprings: The offsprings of the population.
-		:return: The reduced population.
-		"""
-		sorted_parents = sorted(parents, key=lambda ind: ind.fitness)
-		elite_group = sorted_parents[:self.elite]
-		pop = sorted_parents[self.elite:] + offsprings
-		losses = np.zeros(len(pop))
-		for i,ind in enumerate(pop):
-			opponents = rnd.sample(pop, k=self.q)
-			for opp in opponents:
-				if opp.fitness < ind.fitness:
-					losses[i] += 1
-		survivors = sorted(enumerate(pop), key= lambda t: losses[t[0]])[0:self.keep - len(elite_group)]
-		return elite_group + [ind for _,ind in survivors]
-
 class AlgorithmParameters:
 	"""
 	A class that contains all the information to run the genetic algorithm.
 	"""
 
-	def __init__(self, la, mu, beta):
+	def __init__(self, la, init_alpha, init_beta, island_params, exchange_size, exchange_rate):
 		"""
 		Create a new AlgorithmParameters object.
 		:param la: The population size
@@ -835,8 +336,204 @@ class AlgorithmParameters:
 		:param beta: The probability that two parents
 		"""
 		self.la = la
+		self.init_alpha = init_alpha
+		self.init_beta = init_beta
+		self.island_params = island_params
+		self.exchange_size = exchange_size
+		self.exchange_rate = exchange_rate
+
+class IslandParameters:
+	def __init__(self, mu, epsilon, q, min_dist, k):
 		self.mu = mu
-		self.beta = beta
+		self.epsilon = epsilon
+		self.q = q
+		self.min_dist = min_dist
+		self.k = k
+
+def select(population,k):
+	return min(rnd.choices(population, k=k), key=lambda ind: ind.fitness)
+
+def eliminate(elites, peasants, o_elites, o_peasants, q, la):
+	sorted_pop = sorted(elites + peasants + o_elites + o_peasants, key=lambda ind: ind.fitness)
+	survivors = []
+
+	while len(survivors) < la:
+		survivor = sorted_pop.pop(0)
+		survivors.append(survivor)
+		victim = min(rnd.choices(sorted_pop, k=min(q, len(sorted_pop))), key=lambda ind: ind.fitness)
+		sorted_pop.remove(victim)
+
+	return survivors
+
+
+	#wins_elites = battle(elites, o_elites, q)
+	#wins_peasants = battle(peasants, o_peasants, q)
+
+	#elites = sorted(wins_elites.keys(), key=lambda ind: wins_elites[ind], reverse=True)[:len(elites)]
+	#peasants = sorted(wins_peasants.keys(), key=lambda ind: wins_peasants[ind], reverse=True)[:len(peasants)]
+
+	#return elites, peasants
+
+def battle(team1, team2, q):
+	wins = dict()
+	for tm1 in team1:
+		opponents = rnd.choices(team2, k=q)
+		wins[tm1] = np.sum(np.array([1 if tm1.fitness < o.fitness else 0 for o in opponents]))
+
+	for tm2 in team2:
+		opponents = rnd.choices(team1, k=q)
+		wins[tm2] = np.sum(np.array([1 if tm2.fitness < o.fitness else 0 for o in opponents]))
+
+	return wins
+
+def local_search(perm, old_fitness, k):
+	"""
+	Search for a neighbouring permutation that has a better fitness.
+	:param perm: The permutation to improve.
+	:param old_fitness: The fitness to improve.
+	:param k: The maximum length of the inversions.
+	:return: A tuple (p,f) where p is new permutation that has better fitness than the given one or None if no such permutation can be found and f its fitness.
+	"""
+	n = perm.shape[0]
+	inversions = [(i, (i+k) % n) for i in range(n)]
+	best_inversion = None
+	best_fitness = old_fitness
+	for i,j in inversions:
+		new_fitness = estimate_fitness(perm, old_fitness, i, j)
+		if new_fitness < best_fitness:
+			best_fitness = new_fitness
+			best_inversion = (i,j)
+
+	if not best_inversion is None and best_inversion[0] != best_inversion[1]:
+		flip(perm, best_inversion[0], best_inversion[1])
+		f = fitness(perm)
+		if round(best_fitness,4) != round(f, 4):
+			print(best_inversion)
+			raise RuntimeError("{} != {}".format(best_fitness, f))
+		return perm, fitness(perm)
+
+	return None, None
+
+def fitness(perm):
+	"""
+	Calculate the fitness value of the given tour.
+	:param perm: The order of the cities.
+	:return: The fitness value of the given tour.
+	"""
+	n = TSP.distance_matrix.shape[0]
+	return np.sum(np.array([TSP.distance_matrix[perm[i % n]][perm[(i + 1) % n]] for i in range(n)]))
+
+def estimate_fitness(perm, old_fitness, i, j):
+	n = perm.shape[0]
+	new_fitness = old_fitness
+	k = i
+	while k % n != (j - 1) % n:
+		new_fitness -= TSP.distance_matrix[perm[k % n]][perm[(k + 1) % n]]
+		new_fitness += TSP.distance_matrix[perm[(k + 1) % n]][perm[k % n]]
+		k += 1
+	new_fitness -= TSP.distance_matrix[perm[(i - 1) % n]][perm[i]]
+	new_fitness -= TSP.distance_matrix[perm[(j - 1) % n]][perm[j]]
+	new_fitness += TSP.distance_matrix[perm[(i - 1) % n]][perm[(j - 1) % n]]
+	new_fitness += TSP.distance_matrix[perm[i]][perm[j]]
+
+	return new_fitness
+
+def divide(population, elite_size, min_distance):
+	"""
+	Divide the given population in elites and peasants.
+	:param population: The population of Individuals to divide.
+	:param elite_size: The size of the elites.
+	:param min_distance: The minimal distance the members of the elite group should have
+	:return: a tuple (elites,peasants).
+	"""
+	sorted_pop = sorted(population, key=lambda ind: ind.fitness)
+	elites = []
+	k = 0
+	while len(elites) < elite_size and k < len(sorted_pop):
+		allowed = True
+		for elite in elites:
+			if distance(sorted_pop[k].perm, elite.perm) < min_distance:
+				allowed = False
+				break
+		if allowed:
+			elites.append(sorted_pop.pop(k))
+		else:
+			k += 1
+
+	return elites, sorted_pop
+
+def recombine(next_cities1, next_cities2):
+	"""
+	:param next_cities1: A numpy array a where a[perm1[i]] = perm1[i+1 % n]
+	:param next_cities2: A numpy array a where a[perm2[i]] = perm2[i+1 % n]
+	:return: A new permutation that resembles an offspring.
+	"""
+	n = TSP.distance_matrix.shape[0]
+	perm_offspring = np.zeros(shape=n, dtype=int)
+	perm_offspring_lu = set()
+	start = rnd.randrange(0, n)
+	perm_offspring[0] = start
+	perm_offspring_lu.add(start)
+	available_cities = set(range(n))
+	available_cities.remove(perm_offspring[0])
+
+	for i in range(1, n):
+		c = perm_offspring[i - 1]
+		c1 = next_cities1[c]
+		c2 = next_cities2[c]
+
+		c1_ok = c1 not in perm_offspring_lu
+		c2_ok = c2 not in perm_offspring_lu
+		if c1_ok and c2_ok:
+			if TSP.distance_matrix[c][c1] < TSP.distance_matrix[c][c2]:
+				perm_offspring[i] = c1
+			else:
+				perm_offspring[i] = c2
+		elif c1_ok:
+			perm_offspring[i] = c1
+		elif c2_ok:
+			perm_offspring[i] = c2
+		else:
+			perm_offspring[i] = rnd.choices(tuple(available_cities), k=1)[0]
+
+		perm_offspring_lu.add(perm_offspring[i])
+		available_cities.remove(perm_offspring[i])
+
+	return perm_offspring
+
+def mutate(perm, max_length):
+	"""
+	Perform Inversion Mutation on the given permutation.
+	:param perm: The numpy.array to permute.
+	:param max_length: The maximum length of the inversion.
+	"""
+	start = rnd.randrange(perm.shape[0])
+	end = (start + rnd.randrange(1, max_length + 1)) % perm.shape[0]
+	flip(perm,start,end)
+
+def flip(perm, start, end):
+	"""
+	Flip the given permutation; perm[start] will now be perm[end-1].
+	:param perm: The permutation to flip.
+	:param start: The index of the first element to flip.
+	:param end: The index of the first element not to flip.
+	"""
+	if end > start:
+		perm[start:end] = np.flip(perm[start:end])
+	else:
+		flipped_perm = np.concatenate((np.flip(perm[:end]), np.flip(perm[start:])))
+		perm[start:] = flipped_perm[:(perm.shape[0] - start)]
+		if end > 0:
+			perm[:end] = flipped_perm[-end:]
+
+def distance(perm1, perm2):
+	"""
+	Calculate the distance between two permutations.
+	:param perm1: The first permutations.
+	:param perm2: The second permutations.
+	:return: The distance between the two given permutations.
+	"""
+	return perm1.shape[0] - 1 - common_edges(perm1, perm2)
 
 ### UTILITY METHODS
 
