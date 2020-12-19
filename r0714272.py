@@ -94,7 +94,7 @@ class TSP:
     def distribute_population(self):
         for i in range(len(self.islands)):
             elite_victims = rnd.sample(self.islands[i].elites, k=min(len(self.islands[i].elites), 2))
-            peasants_victims = rnd.sample(self.islands[i].peasants, k=self.params.exchange_size - 2)
+            peasants_victims = rnd.sample(self.islands[i].peasants, k=self.params.exchange_size - len(elite_victims))
             self.islands[(i+1) % len(self.islands)].peasants += peasants_victims
             self.islands[(i + 1) % len(self.islands)].elites += elite_victims
             #self.islands[i].redivide()
@@ -115,7 +115,7 @@ class TSP:
 
         if self.iteration % self.params.exchange_rate == 0:
             print("Redistributing population...")
-            #self.distribute_population()
+            self.distribute_population()
 
     def report_values(self):
         best = min([island.best_individual for island in self.islands], key=lambda ind: ind.fitness)
@@ -138,7 +138,7 @@ class Island:
         self.best_individual = None
         self.mean_fitness = 0
         self.worst_fitness = 0
-        self.distribution = [0.2, 0.3]
+        self.distribution = [0.3, 0.6]
         self.update_statistics()
         self.ai_ls = 0
         self.lsc = 0
@@ -406,7 +406,7 @@ def pick_survivors(population, la, q):
     while len(survivors) < la:
         survivor = sorted_pop.pop(0)
         survivors.append(survivor)
-        victim = min(rnd.choices(sorted_pop, k=min(q, len(sorted_pop))), key=lambda ind: ind.fitness)
+        victim = min(rnd.choices(sorted_pop, k=min(q, len(sorted_pop))), key=lambda ind: distance(ind.perm, survivor.perm))
         sorted_pop.remove(victim)
 
     return survivors
