@@ -19,13 +19,13 @@ class r0714272:
         distance_matrix = np.loadtxt(file, delimiter=",")
         file.close()
         seed = rnd.randrange(0, 1239719)
-        # best seed: 683676
-        print("SEED = {}".format(12345678))
-        rnd.seed(12345678)
-        np.random.seed(12345678)
+        # best seed: 97427
+        print("SEED = {}".format(97427))
+        rnd.seed(97427)
+        np.random.seed(97427)
 
         island_params = [IslandParameters(mu=200, epsilon=5, q=10, min_dist=3, k=3)] * 4
-        params = AlgorithmParameters(la=200, init_alpha=0.1, init_beta=0.75, island_params=island_params, exchange_size=10, exchange_rate=50)
+        params = AlgorithmParameters(la=200, init_alpha=0.1, init_beta=0.75, island_params=island_params, exchange_size=5, exchange_rate=25)
         tsp = TSP(distance_matrix,params)
 
         # Initialize the population
@@ -52,13 +52,15 @@ class TSP:
     """ Class that represents an evolutionary algorithm to solve the Travelling Salesman Problem. """
     distance_matrix = None
     n = None
+    furthest = None
     def __init__(self, distance_matrix, params):
         TSP.distance_matrix = distance_matrix
         TSP.n = distance_matrix.shape[0]
         self.params = params
         self.islands = []
-        self.sc = SlopeChecker(-0.0000000001, 0.5)
+        self.sc = SlopeChecker(-0.0000000001, 0.75)
         self.iteration = 0
+        TSP.furthest = np.unravel_index(np.argmax(distance_matrix), distance_matrix.shape)
 
     def initialize(self):
         """
@@ -84,7 +86,10 @@ class TSP:
             perm[0] = start
             available_cities.remove(start)
             for i in range(1, TSP.n):
+                #best_cities = sorted(available_cities, key=lambda city: self.distance_matrix[perm[i - 1]][city])[:3]
+                #best_city = rnd.choice(best_cities)
                 perm[i] = min(available_cities, key=lambda city: self.distance_matrix[perm[i - 1]][city])
+                #perm[i] = best_city
                 available_cities.remove(perm[i])
             (i, j) = random_ind(TSP.n)
             flip(perm, i, j)
@@ -93,10 +98,11 @@ class TSP:
 
     def distribute_population(self):
         for i in range(len(self.islands)):
-            elite_victims = rnd.sample(self.islands[i].elites, k=min(len(self.islands[i].elites), 2))
-            peasants_victims = rnd.sample(self.islands[i].peasants, k=self.params.exchange_size - len(elite_victims))
+            elite_victims = [select(self.islands[i].elites, min(len(self.islands[i].elites), 3)) for _ in range(2)]
+            #elite_victims = list(self.islands[i].elites)
+            peasants_victims = [select(self.islands[i].peasants, 3) for _ in range(self.params.exchange_size - len(elite_victims))]
             self.islands[(i+1) % len(self.islands)].peasants += peasants_victims
-            self.islands[(i + 1) % len(self.islands)].elites += elite_victims
+            self.islands[(i+1) % len(self.islands)].elites += elite_victims
             #self.islands[i].redivide()
 
 
@@ -138,7 +144,7 @@ class Island:
         self.best_individual = None
         self.mean_fitness = 0
         self.worst_fitness = 0
-        self.distribution = [0.3, 0.6]
+        self.distribution = [0.2, 0.3]
         self.update_statistics()
         self.ai_ls = 0
         self.lsc = 0
@@ -187,6 +193,7 @@ class Island:
             return Individual(perm_offspring, new_fitness, parent1.alpha, new_beta)
         else:
             perm_offspring = recombine(parent1.next_cities, parent2.next_cities)
+            #perm_offspring = recombine2(parent1.perm, parent2.perm)
             new_alpha = min(1.0, max(0.0, parent1.alpha + 2 * (rnd.random() - 0.5) * (parent2.alpha - parent1.alpha)))
             new_beta = min(1.0, max(0.0, parent1.beta + 2 * (rnd.random() - 0.5) * (parent2.beta - parent1.beta)))
             return Individual(perm_offspring, fitness(perm_offspring), new_alpha, new_beta)
@@ -196,7 +203,7 @@ class Island:
         """
         Mutate the population.
         """
-        for ind in self.offsprings + self.peasants:
+        for ind in self.offsprings:
             if rnd.random() < ind.alpha:
                 self.mutc += 1
                 mutate(ind.perm, ind.perm.shape[0]-1) #TODO: what should max_length be?
@@ -209,9 +216,15 @@ class Island:
         """
         Eliminate certain Individuals from the population.
         """
+
         o_elites, o_peasants = divide(self.offsprings, self.params.epsilon, self.params.min_dist)
-        new_population = eliminate(self.elites, self.peasants, o_elites, o_peasants, self.params.q, self.params.epsilon, self.la)
+        #new_population = eliminate(self.elites, self.peasants, o_elites, o_peasants, self.params.q, self.params.epsilon, self.la)
+
+
+        new_population = pick_survivors(self.elites + o_elites + self.peasants + o_peasants, self.la, self.params.q)
+
         self.elites, self.peasants = divide(new_population, self.params.epsilon, self.params.min_dist)
+        #self.elites, self.peasants = divide(pick_survivors(self.elites + self.peasants + self.offsprings, self.la, self.params.q), self.params.epsilon, self.params.min_dist)
         self.offsprings = []
 
     def redivide(self):
@@ -230,7 +243,7 @@ class Island:
         #    else:
         #        ind.k += 1
 
-        for ind in self.elites: # + self.peasants:
+        for ind in self.elites:# + self.peasants:
             if not ind.optimized:
                 self.lsc += 1
                 self.ai_ls -= ind.fitness
@@ -246,8 +259,9 @@ class Island:
                     ind.k += +1
                     if ind.k >= TSP.n:
                         ind.optimized = True
-                        raise RuntimeError("LOCAL OPTIMA")
+                        # raise RuntimeError("LOCAL OPTIMA")
                         #print("Found local optima")
+
                 self.ai_ls += ind.fitness
 
 
@@ -567,6 +581,53 @@ def recombine(next_cities1, next_cities2):
 
     return perm_offspring
 
+
+def recombine2(perm1, perm2):
+    length = perm1.shape[0]
+    (start, end) = random_ind(length)
+
+    offspring_perm = np.ones(length, dtype=int)
+    offspring_perm[start:end + 1] = perm1[start:end + 1]
+
+    k = 0
+
+    for i in range(length):
+        if perm2[(end + i + 1) % length] not in offspring_perm:
+            offspring_perm[(end + k + 1) % length] = perm2[(end + i + 1) % length]
+            k += + 1
+
+    return offspring_perm
+
+
+def copy_to(src, i1, j1, dest, i2, j2):
+    x = slice(src, i1, j1)
+    if i2 < j2:
+        dest[i2:j2] = x
+    else:
+        dest[i2:] = x[:(dest.shape[0]-i2)]
+        dest[:j2] = x[-j2:]
+
+
+def recombine3(perm1, perm2):
+    start = np.argwhere(perm1 == TSP.furthest[0])[0][0]
+    end = np.argwhere(perm1 == TSP.furthest[1])[0][0]
+
+    offspring_perm = np.ones(TSP.n, dtype=int)
+    copy_to(perm1, start, end+1 % TSP.n, offspring_perm, start, end+1)
+
+    k = 0
+
+    for i in range(TSP.n):
+        if perm2[(end + i + 1) % TSP.n] not in offspring_perm:
+            offspring_perm[(end + k + 1) % TSP.n] = perm2[(end + i + 1) % TSP.n]
+            k += + 1
+
+    if offspring_perm.shape[0] != TSP.n:
+        raise RuntimeError("NOOOOO")
+    if sorted(list(offspring_perm)) != list(range(TSP.n)):
+        raise RuntimeError("NOOOOO...")
+
+    return offspring_perm
 def mutate(perm, max_length):
     """
     Perform Inversion Mutation on the given permutation.
@@ -599,14 +660,21 @@ def distance(perm1, perm2):
     :param perm2: The second permutations.
     :return: The distance between the two given permutations.
     """
-    start_idx = np.flatnonzero(perm2 == perm1[0])[0]
-    if start_idx < TSP.n / 2:
-        return min_swap(perm1, np.roll(perm2, -start_idx))
-    else:
-        return min_swap(perm1, np.roll(perm2, TSP.n - start_idx))
-    #return TSP.n - 1 - common_edges(perm1, perm2)
+    #start_idx = np.flatnonzero(perm2 == perm1[0])[0]
+    #if start_idx < TSP.n / 2:
+    #    return min_swap(perm1, np.roll(perm2, -start_idx))
+    #else:
+    #    return min_swap(perm1, np.roll(perm2, TSP.n - start_idx))
+    return TSP.n - 1 - common_edges(perm1, perm2)
 
 ### UTILITY METHODS
+
+def slice(x,i,j):
+    if j < i:
+        return np.concatenate((x[i:], x[:j]))
+    else:
+        return x[i:j]
+
 
 def random_ind(n):
     """
