@@ -5,6 +5,7 @@ import numpy as np
 import random as rnd
 import heapq as hq
 import matplotlib.pyplot as plt
+import tour_visualizer
 
 class r0714272:
 
@@ -20,11 +21,13 @@ class r0714272:
         file.close()
         seed = rnd.randrange(0, 1239719)
         # best seed: 97427
-        print("SEED = {}".format(97427))
-        rnd.seed(97427)
-        np.random.seed(97427)
+        seed = 97427
+        print("SEED = {}".format(seed))
+        rnd.seed(seed)
+        np.random.seed(seed)
 
-        island_params = [IslandParameters(mu=200, epsilon=5, q=10, min_dist=3, k=3)] * 4
+        island_params = [IslandParameters(mu=200, epsilon=10, q=10, min_dist=3, k=3)] * 2
+        island_params += [IslandParameters(mu=200, epsilon=10, q=10, min_dist=3, k=3)] * 2
         params = AlgorithmParameters(la=200, init_alpha=0.1, init_beta=0.75, island_params=island_params, exchange_size=5, exchange_rate=25)
         tsp = TSP(distance_matrix,params)
 
@@ -32,16 +35,22 @@ class r0714272:
         tsp.initialize()
         best_sol = None
         best_obj = None
-        while tsp.should_continue():
-            (mean_obj, best_obj, best_sol) = tsp.report_values()
-            time_left = self.reporter.report(mean_obj, best_obj, best_sol)
-            if time_left < 0:
-                print("Ran out of time!")
-                break
+        try:
+            while tsp.should_continue():
+                (mean_obj, best_obj, best_sol) = tsp.report_values()
+                time_left = self.reporter.report(mean_obj, best_obj, best_sol)
+                if time_left < 0:
+                    print("Ran out of time!")
+                    break
 
-            tsp.update()
+                tsp.update()
+        except KeyboardInterrupt:
+            pass
 
         real_best = fitness(best_sol)
+        if filename == "Matrix.csv":
+            tour_visualizer.plot_permutation(best_sol)
+
         if real_best != best_obj:
             raise RuntimeError("WRONG SOLUTION: {} != {}".format(real_best, best_obj))
 
@@ -66,7 +75,10 @@ class TSP:
         """
         Initialize the population using random permutations and the initial values specified in the AlgorithmParameters object.
         """
-        permutations = self.get_initial_permutations()
+        good_permutations = self.get_initial_permutations()
+        random_permutations = [np.random.permutation(TSP.n) for _ in range(self.params.la - len(good_permutations))]
+        permutations = good_permutations + random_permutations
+        #permutations = good_permutations
         population = [Individual(permutations[j], fitness(permutations[j]), 2 * (rnd.random() - 0.5) * 0.02 + self.params.init_alpha, self.params.init_beta) for j in range(self.params.la)]
         island_la = int(self.params.la / len(self.params.island_params))
         for island_params in self.params.island_params:
@@ -79,7 +91,7 @@ class TSP:
 
     def get_initial_permutations(self):
         permutations = []
-        for _ in range(self.params.la):
+        for _ in range(self.params.la//10):
             start = rnd.randrange(0, TSP.n)
             available_cities = set(range(TSP.n))
             perm = np.zeros(TSP.n, dtype=int)
@@ -120,8 +132,12 @@ class TSP:
         print("best: {}, mean: {}, alpha: {}, beta: {}".format(best_ind.fitness, self.report_values()[0], best_ind.alpha, best_ind.beta))
 
         if self.iteration % self.params.exchange_rate == 0:
+            print("{} mod {} is 0".format(self.iteration, self.params.exchange_rate))
             print("Redistributing population...")
             self.distribute_population()
+            #self.params.exchange_rate += rnd.randrange(-1, 2) * 5
+            #if self.params.exchange_rate <= 0:
+            #    self.params.exchange_rate = 10
 
     def report_values(self):
         best = min([island.best_individual for island in self.islands], key=lambda ind: ind.fitness)
@@ -296,6 +312,10 @@ class Island:
         """
         Update the population.
         """
+        #if len(self.elites) == self.params.epsilon:
+        #    self.params.min_dist += 1
+        #elif len(self.elites) <= self.params.epsilon // 2:
+        #    self.params.min_dist -= 1
         self.create_offsprings()
         self.mutate()
         self.local_search()
@@ -420,7 +440,7 @@ def pick_survivors(population, la, q):
     while len(survivors) < la:
         survivor = sorted_pop.pop(0)
         survivors.append(survivor)
-        victim = min(rnd.choices(sorted_pop, k=min(q, len(sorted_pop))), key=lambda ind: distance(ind.perm, survivor.perm))
+        victim = min(rnd.choices(sorted_pop, k=min(q, len(sorted_pop))), key=lambda ind: distance(ind, survivor))
         sorted_pop.remove(victim)
 
     return survivors
@@ -452,11 +472,11 @@ def local_search(perm):
     best_edge = min([i for i in range(TSP.n)], key= lambda i:calc_fitness_swap(perm, old_f, worst_edge, i))
     new_f = calc_fitness_swap(perm, old_f, worst_edge, best_edge)
     perm[worst_edge], perm[best_edge] = perm[best_edge], perm[worst_edge]
-    f = fitness(perm)
+    #f = fitness(perm)
 
-    if round(f,4) != round(new_f,4):
-        raise RuntimeError("[{}, {}]: {} != {}".format(worst_edge, best_edge, f, new_f))
-    return f
+    #if round(f,4) != round(new_f,4):
+    #    raise RuntimeError("[{}, {}]: {} != {}".format(worst_edge, best_edge, f, new_f))
+    return fitness(perm)
 
 def calc_gain(perm, i, j):
     n = perm.shape[0]
@@ -489,10 +509,10 @@ def local_search2(perm, old_fitness, k):
 
     if not best_inversion is None and best_inversion[0] != best_inversion[1]:
         flip(perm, best_inversion[0], best_inversion[1])
-        f = fitness(perm)
-        if round(best_fitness,4) != round(f, 4):
-            print(best_inversion)
-            raise RuntimeError("{} != {}".format(best_fitness, f))
+
+        #if round(best_fitness,4) != round(f, 4):
+        #    print(best_inversion)
+        #    raise RuntimeError("{} != {}".format(best_fitness, f))
         return perm, fitness(perm)
 
     return None, None
@@ -533,7 +553,7 @@ def divide(population, elite_size, min_distance):
     while len(elites) < elite_size and k < len(sorted_pop):
         allowed = True
         for elite in elites:
-            if distance(sorted_pop[k].perm, elite.perm) < min_distance:
+            if distance(sorted_pop[k], elite) < min_distance:
                 allowed = False
                 break
         if allowed:
@@ -543,7 +563,7 @@ def divide(population, elite_size, min_distance):
 
     return elites, sorted_pop
 
-def recombine(next_cities1, next_cities2):
+def recombine_slow(next_cities1, next_cities2):
     """
     :param next_cities1: A numpy array a where a[perm1[i]] = perm1[i+1 % n]
     :param next_cities2: A numpy array a where a[perm2[i]] = perm2[i+1 % n]
@@ -579,6 +599,41 @@ def recombine(next_cities1, next_cities2):
         perm_offspring_lu.add(perm_offspring[i])
         available_cities.remove(perm_offspring[i])
 
+    return perm_offspring
+
+def recombine(next_cities1, next_cities2):
+    """
+    :param next_cities1: A numpy array a where a[perm1[i]] = perm1[i+1 % n]
+    :param next_cities2: A numpy array a where a[perm2[i]] = perm2[i+1 % n]
+    :return: A new permutation that resembles an offspring.
+    """
+    perm_offspring = np.zeros(shape=TSP.n, dtype=int)
+    city_used = np.zeros(shape=TSP.n, dtype=bool)
+    start = rnd.randrange(0, TSP.n)
+    perm_offspring[0] = start
+    city_used[start] = True
+
+    for i in range(1, TSP.n):
+        c = perm_offspring[i - 1]
+        c1 = next_cities1[c]
+        c2 = next_cities2[c]
+
+        c1_ok = not city_used[c1] #c1 not in perm_offspring_lu
+        c2_ok = not city_used[c2] #c2 not in perm_offspring_lu
+        if c1_ok and c2_ok:
+            if TSP.distance_matrix[c][c1] < TSP.distance_matrix[c][c2]:
+                perm_offspring[i] = c1
+            else:
+                perm_offspring[i] = c2
+        elif c1_ok:
+            perm_offspring[i] = c1
+        elif c2_ok:
+            perm_offspring[i] = c2
+        else:
+            available_cities = np.argwhere(city_used == False)
+            perm_offspring[i] = available_cities[int(rnd.random() * len(available_cities))][0]
+
+        city_used[perm_offspring[i]] = True
     return perm_offspring
 
 
@@ -653,7 +708,7 @@ def flip(perm, start, end):
         if end > 0:
             perm[:end] = flipped_perm[-end:]
 
-def distance(perm1, perm2):
+def distance(ind1, ind2):
     """
     Calculate the distance between two permutations.
     :param perm1: The first permutations.
@@ -665,7 +720,7 @@ def distance(perm1, perm2):
     #    return min_swap(perm1, np.roll(perm2, -start_idx))
     #else:
     #    return min_swap(perm1, np.roll(perm2, TSP.n - start_idx))
-    return TSP.n - 1 - common_edges(perm1, perm2)
+    return TSP.n - 1 - common_edges(ind1.next_cities, ind2.next_cities)
 
 ### UTILITY METHODS
 
@@ -764,10 +819,13 @@ def min_swap(a, b):
 
     return ans
 
-def common_edges(a, b):
+def common_edges_slow(a, b):
     edges = set()
     for i in range(TSP.n):
         edges.add((a[i], a[(i+1) % TSP.n]))
         edges.add((b[i], b[(i+1) % TSP.n]))
 
     return 2 * TSP.n - len(edges)
+
+def common_edges(next_cities1, next_cities2):
+    return np.count_nonzero(next_cities1 == next_cities2)

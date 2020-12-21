@@ -10,10 +10,9 @@ if __name__ == "__main__":
 
     filename = "{}.csv".format(sys.argv[1])
     r = r0714272()
-    try:
-        r.optimize(filename)
-    except KeyboardInterrupt:
-        pass
+
+    r.optimize(filename)
+
 
     csv_content = [line.split(',') for line in open("r0714272.csv").read().split("\n")[2:] if line.strip() != ""]
     iterations = [int(elems[0]) for elems in csv_content]
