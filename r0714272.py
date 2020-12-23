@@ -15,11 +15,11 @@ class r0714272:
         distance_matrix = np.loadtxt(file, delimiter=",")
         file.close()
 
-        island_params = [IslandParameters(mu=200, epsilon=10, q=25, min_dist=6, k=3, distribution=[0.2, 0.3], parent_reward=1.02, parent_punishment=0.999)]
-        island_params += [IslandParameters(mu=200, epsilon=10, q=25,min_dist=5, k=3, distribution=[0.2, 0.3], parent_reward=1.02, parent_punishment=0.999)]
-        island_params += [IslandParameters(mu=200, epsilon=10, q=25, min_dist=4, k=3, distribution=[0.2, 0.3], parent_reward=1.02, parent_punishment=0.999)]
-        island_params += [IslandParameters(mu=200, epsilon=10, q=25, min_dist=3, k=3, distribution=[0.2, 0.3], parent_reward=1.02, parent_punishment=0.999)]
-        params = AlgorithmParameters(la=200, init_alpha=0.1, var_alpha=0.02, init_beta=0.9, island_params=island_params, exchange_size=(2, 10), exchange_rate=25, max_slope=-0.00000001, slope_weight=0.6)
+        island_params = [IslandParameters(mu=200, epsilon=15, q=30, min_dist=5, k=3, distribution=[0.25, 0.35], parent_reward=1.02)]
+        island_params += [IslandParameters(mu=200, epsilon=10, q=30,min_dist=5, k=3, distribution=[0.2, 0.4], parent_reward=1.02)]
+        island_params += [IslandParameters(mu=200, epsilon=10, q=30, min_dist=5, k=3, distribution=[0.3, 0.35], parent_reward=1.02)]
+        island_params += [IslandParameters(mu=200, epsilon=15, q=30, min_dist=5, k=3, distribution=[0.2, 0.3], parent_reward=1.02)]
+        params = AlgorithmParameters(la=200, init_alpha=0.1, var_alpha=0.02, init_beta=0.75, island_params=island_params, exchange_size=(2, 10), exchange_rate=25, max_slope=-0.00000001, slope_weight=0.6)
         tsp = TSP(distance_matrix,params)
 
         # Initialize the population
@@ -30,7 +30,6 @@ class r0714272:
                 (mean_obj, best_obj, best_sol) = tsp.report_values()
                 time_left = self.reporter.report(mean_obj, best_obj, best_sol)
                 if time_left < 0:
-                    print("Ran out of time!")
                     break
 
                 tsp.update()
@@ -83,7 +82,7 @@ class TSP:
         """
         Initialize the population using random permutations.
         """
-        permutations = self.generate_start_permutations(20)
+        permutations = TSP.generate_start_permutations(20)
         permutations += [np.random.permutation(TSP.n) for _ in range(self.params.la - len(permutations))]
         rnd.shuffle(permutations)
 
@@ -95,7 +94,8 @@ class TSP:
             island_pop = [population.pop(0) for _ in range(island_la)]
             self.islands.append(Island(island_pop, island_params))
 
-    def generate_start_permutations(self, m):
+    @staticmethod
+    def generate_start_permutations(m):
         """
         Calculate m starting permutations by choosing a random start city and performing a greedy walk.
         :param m: The amount of starting permutations to generate.
@@ -126,7 +126,6 @@ class TSP:
             peasants_victims = [select(self.islands[i].peasants, island.params.k).cpy() for _ in range(self.params.ex_size_peasants)]
             self.islands[(i+1) % len(self.islands)].peasants += peasants_victims
             self.islands[(i+1) % len(self.islands)].elites += elite_victims
-            #island.params.k = max(island.params.k - 1, 3)
 
     def update_slope(self, best_obj):
         """
@@ -146,10 +145,9 @@ class TSP:
 
         for island in self.islands:
             island.update()
-            print("best: {} \t\t mean: {} \t\t best alpha: {} \t\t best beta: {}".format(island.best_individual.fitness, island.mean_fitness, island.best_individual.alpha, island.best_individual.beta))
 
         mo, bo, _ = self.report_values()
-        print("[{}] best fitness: {}, mean fitness: {}".format(self.iteration, bo, mo))
+        print("[{}] best: {} \t\t mean: {} ".format(self.iteration, bo, mo))
         self.update_slope(bo)
 
         if self.iteration % self.params.exchange_rate == 0:
@@ -164,8 +162,7 @@ class TSP:
               with city numbering starting from 0
         :return: A tuple (m, bo, bs) that represent the mean objective, best objective and best solution respectively
         """
-        i,best = min([(i,island.best_individual) for i,island in enumerate(self.islands)], key=lambda ind: ind[1].fitness)
-        print("best in island", i)
+        best = min([island.best_individual for island in self.islands], key=lambda ind: ind.fitness)
         return sum(island.mean_fitness for island in self.islands) / 4.0, best.fitness, best.perm
 
     def should_stop(self):
@@ -173,7 +170,6 @@ class TSP:
         Check if the algorithm should stop.
         :return: True if the algorithm should stop, False otherwise.
         """
-        #mo,bo,_ = self.report_values()
         return self.slope >= self.params.max_slope and self.iteration > 2
 
 class Island:
@@ -209,7 +205,7 @@ class Island:
         peasants_pool = [(select(self.peasants, self.params.k), select(self.peasants, self.params.k)) for _ in range(self.params.mu - len(self.offsprings))]
         self.do_crossovers(peasants_pool)
 
-    def do_crossovers(self, mating_pool, forced=False):
+    def do_crossovers(self, mating_pool):
         """
         Perform all crossovers in the given mating pool.
         The offsprings will be stored in self.offsprings.
@@ -220,7 +216,7 @@ class Island:
             parent1_ready = chance <= parent1.beta
             parent2_ready = chance <= parent2.beta
 
-            if (parent1_ready and parent2_ready and parent1 != parent2) or forced:
+            if parent1_ready and parent2_ready and parent1 != parent2:
                 child = Island.create_offspring(parent1, parent2)
                 self.offsprings.append(child)
                 self.evaluate_parent(parent1, child)
@@ -237,10 +233,7 @@ class Island:
 
     def evaluate_parent(self, parent, child):
         if child.fitness < parent.fitness:
-            parent.beta = min(1.0, max(0.0, parent.beta * self.params.parent_reward))
-        #else:
-        #    parent.beta = min(1.0, max(0.0, parent.beta * self.params.parent_punishment))
-
+            parent.beta = min(1.0, parent.beta * self.params.parent_reward)
 
     @staticmethod
     def create_offspring(parent1, parent2=None):
@@ -253,7 +246,7 @@ class Island:
         """
         if parent2 is None:
             perm_offspring = np.copy(parent1.perm)
-            mutate(perm_offspring, perm_offspring.shape[0]//4) #TODO: what should max_length be?
+            mutate(perm_offspring, perm_offspring.shape[0]//4)
             new_fitness = fitness(perm_offspring)
             return Individual(perm_offspring, new_fitness, parent1.alpha, parent1.beta)
         else:
@@ -469,7 +462,6 @@ def recombine(next_cities1, next_cities2):
     perm_offspring = np.zeros(shape=TSP.n, dtype=int)
     city_used = np.zeros(shape=TSP.n, dtype=bool)
     start = rnd.randrange(0, TSP.n)
-    #start = calc_best_start_city(next_cities1, next_cities2)
 
     perm_offspring[0] = start
     city_used[start] = True
@@ -618,7 +610,7 @@ class IslandParameters:
     """
     Class that contains all the information to run an island.
     """
-    def __init__(self, mu, epsilon, q, min_dist, k, distribution, parent_reward, parent_punishment):
+    def __init__(self, mu, epsilon, q, min_dist, k, distribution, parent_reward):
         """
         Create a new IslandParameters object
         :param mu: The amount of offsprings to create
@@ -628,6 +620,8 @@ class IslandParameters:
         :param k: The parameter for k-tournament selection
         :param distribution: A list [p1,p2] where p1 is the proportion of offsprings that will be create from two elite parents,
                              and p2 the proportion of offsprings create a from a peasant and an elite.
+        :param parent_reward: The reward that a parent receives for creating an offspring that is better then itself.
+                              The beta of the parent will be multiplied with this value.
         """
         self.mu = mu
         self.epsilon = epsilon
@@ -636,7 +630,6 @@ class IslandParameters:
         self.k = k
         self.distribution = distribution
         self.parent_reward = parent_reward
-        self.parent_punishment = parent_punishment
 
 
 ### ----------------- ###
@@ -694,22 +687,3 @@ def invert(perm, start, end):
         perm[start:] = flipped_perm[:(perm.shape[0] - start)]
         if end > 0:
             perm[:end] = flipped_perm[-end:]
-
-def calc_best_start_city(next_cities1, next_cities2):
-    current_start = rnd.randrange(0, TSP.n)
-    best_start = current_start
-    c = current_start
-    maxl = 0
-    l = 0
-    for i in range(TSP.n):
-        nc1, nc2 = next_cities1[c], next_cities2[c]
-        if next_cities1[c] == next_cities2[c]:
-            l += 1
-        else:
-            if l > maxl:
-                maxl = l
-                best_start = current_start
-            current_start = nc1
-            l = 0
-        c = nc1
-    return best_start
